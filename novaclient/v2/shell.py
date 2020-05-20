@@ -16,8 +16,6 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-from __future__ import print_function
-
 import argparse
 import collections
 import datetime
@@ -31,7 +29,6 @@ import time
 from oslo_utils import netutils
 from oslo_utils import strutils
 from oslo_utils import timeutils
-import six
 
 import novaclient
 from novaclient import api_versions
@@ -478,7 +475,7 @@ def _boot(cs, args):
             # NOTE(vish): multiple copies of the same hint will
             #             result in a list of values
             if key in hints:
-                if isinstance(hints[key], six.string_types):
+                if isinstance(hints[key], str):
                     hints[key] = [hints[key]]
                 hints[key] += [value]
             else:
@@ -490,7 +487,9 @@ def _boot(cs, args):
     elif str(args.config_drive).lower() in ("false", "0", "", "none"):
         config_drive = None
     else:
-        config_drive = args.config_drive
+        raise exceptions.CommandError(
+            _("The value of the '--config-drive' option must be "
+              "a boolean value."))
 
     boot_kwargs = dict(
         meta=meta,
@@ -515,6 +514,12 @@ def _boot(cs, args):
 
     if 'tags' in args and args.tags:
         boot_kwargs["tags"] = args.tags.split(',')
+
+    if 'host' in args and args.host:
+        boot_kwargs["host"] = args.host
+
+    if 'hypervisor_hostname' in args and args.hypervisor_hostname:
+        boot_kwargs["hypervisor_hostname"] = args.hypervisor_hostname
 
     if include_files:
         boot_kwargs['files'] = files
@@ -885,7 +890,7 @@ def _boot(cs, args):
     metavar="<value>",
     dest='config_drive',
     default=False,
-    help=_("Enable config drive."))
+    help=_("Enable config drive. The value must be a boolean value."))
 @utils.arg(
     '--poll',
     dest='poll',
@@ -942,6 +947,21 @@ def _boot(cs, args):
            'May be specified multiple times to pass multiple trusted image '
            'certificate IDs.'),
     start_version="2.63")
+@utils.arg(
+    '--host',
+    metavar='<host>',
+    dest='host',
+    default=None,
+    help=_('Requested host to create servers. Admin only by default.'),
+    start_version="2.74")
+@utils.arg(
+    '--hypervisor-hostname',
+    metavar='<hypervisor-hostname>',
+    dest='hypervisor_hostname',
+    default=None,
+    help=_('Requested hypervisor hostname to create servers. Admin only by '
+           'default.'),
+    start_version="2.74")
 def do_boot(cs, args):
     """Boot a new server."""
     boot_args, boot_kwargs = _boot(cs, args)
@@ -1418,14 +1438,6 @@ def _print_flavor(flavor):
     default=None,
     help=_('Search with regular expression match by name.'))
 @utils.arg(
-    '--instance-name',
-    dest='instance_name',
-    metavar='<name-regexp>',
-    default=None,
-    action=shell.DeprecatedAction,
-    help=_('Search with regular expression match by server name. The option '
-           'is not used and will be removed in T release.'))
-@utils.arg(
     '--status',
     dest='status',
     metavar='<status>',
@@ -1472,7 +1484,8 @@ def _print_flavor(flavor):
     dest='user',
     metavar='<user>',
     nargs='?',
-    help=_('Display information from single user (Admin only).'))
+    help=_('Display information from single user (Admin only until '
+           'microversion 2.82).'))
 @utils.arg(
     '--deleted',
     dest='deleted',
@@ -1515,6 +1528,66 @@ def _print_flavor(flavor):
            "will be displayed. If limit is bigger than 'CONF.api.max_limit' "
            "option of Nova API, limit 'CONF.api.max_limit' will be used "
            "instead."))
+@utils.arg(
+    '--availability-zone',
+    dest='availability_zone',
+    metavar='<availability_zone>',
+    default=None,
+    help=_('Display servers based on their availability zone (Admin only '
+           'until microversion 2.82).'))
+@utils.arg(
+    '--key-name',
+    dest='key_name',
+    metavar='<key_name>',
+    default=None,
+    help=_('Display servers based on their keypair name (Admin only until '
+           'microversion 2.82).'))
+@utils.arg(
+    '--config-drive',
+    action='store_true',
+    group='config_drive',
+    default=None,
+    help=_('Display servers that have a config drive attached. (Admin only '
+           'until microversion 2.82).'))
+# NOTE(gibi): this won't actually do anything until bug 1871409 is fixed
+# and the REST API is cleaned up regarding the values of config_drive
+@utils.arg(
+    '--no-config-drive',
+    action='store_false',
+    group='config_drive',
+    help=_('Display servers that do not have a config drive attached (Admin '
+           'only until microversion 2.82)'))
+@utils.arg(
+    '--progress',
+    dest='progress',
+    metavar='<progress>',
+    default=None,
+    help=_('Display servers based on their progress value (Admin only until '
+           'microversion 2.82).'))
+@utils.arg(
+    '--vm-state',
+    dest='vm_state',
+    metavar='<vm_state>',
+    default=None,
+    help=_('Display servers based on their vm_state value (Admin only until '
+           'microversion 2.82).'))
+@utils.arg(
+    '--task-state',
+    dest='task_state',
+    metavar='<task_state>',
+    default=None,
+    help=_('Display servers based on their task_state value (Admin only until '
+           'microversion 2.82).'))
+# TODO(gibi): this is now only work with the integer power state values.
+# Later on we can extend this to accept the string values of the power state
+# and translate it to integers towards the REST API.
+@utils.arg(
+    '--power-state',
+    dest='power_state',
+    metavar='<power_state>',
+    default=None,
+    help=_('Display servers based on their power_state value (Admin only '
+           'until microversion 2.82).'))
 @utils.arg(
     '--changes-since',
     dest='changes_since',
@@ -1571,6 +1644,15 @@ def _print_flavor(flavor):
            "case is 'NOT(t1 OR t2)'. Tags must be separated by commas: "
            "--not-tags-any <tag1,tag2>"),
     start_version="2.26")
+@utils.arg(
+    '--locked',
+    dest='locked',
+    metavar='<locked>',
+    default=None,
+    help=_("Display servers based on their locked value. A value must be "
+           "specified; eg. 'true' will list only locked servers and 'false' "
+           "will list only unlocked servers."),
+    start_version="2.73")
 def do_list(cs, args):
     """List servers."""
     imageid = None
@@ -1580,8 +1662,9 @@ def do_list(cs, args):
     if args.flavor:
         flavorid = _find_flavor(cs, args.flavor).id
     # search by tenant or user only works with all_tenants
-    if args.tenant or args.user:
+    if args.tenant:
         args.all_tenants = 1
+
     search_opts = {
         'all_tenants': args.all_tenants,
         'reservation_id': args.reservation_id,
@@ -1595,8 +1678,15 @@ def do_list(cs, args):
         'user_id': args.user,
         'host': args.host,
         'deleted': args.deleted,
-        'instance_name': args.instance_name,
-        'changes-since': args.changes_since}
+        'changes-since': args.changes_since,
+        'availability_zone': args.availability_zone,
+        'config_drive': args.config_drive,
+        'key_name': args.key_name,
+        'progress': args.progress,
+        'vm_state': args.vm_state,
+        'task_state': args.task_state,
+        'power_state': args.power_state,
+    }
 
     for arg in ('tags', "tags-any", 'not-tags', 'not-tags-any'):
         if arg in args:
@@ -1647,6 +1737,11 @@ def do_list(cs, args):
         except ValueError:
             raise exceptions.CommandError(_('Invalid changes-before value: %s')
                                           % search_opts['changes-before'])
+
+    # In microversion 2.73 we added ``locked`` option in server details.
+    have_added_locked = cs.api_version >= api_versions.APIVersion('2.73')
+    if have_added_locked and args.locked:
+        search_opts['locked'] = args.locked
 
     servers = cs.servers.list(detailed=detailed,
                               search_opts=search_opts,
@@ -2164,12 +2259,23 @@ def do_start(cs, args):
         _("Unable to start the specified server(s)."))
 
 
+# From microversion 2.73, we can specify a reason for locking the server.
 @utils.arg('server', metavar='<server>', help=_('Name or ID of server.'))
+@utils.arg(
+    '--reason',
+    metavar='<reason>',
+    help=_('Reason for locking the server.'),
+    start_version='2.73')
 def do_lock(cs, args):
     """Lock a server. A normal (non-admin) user will not be able to execute
     actions on a locked server.
     """
-    _find_server(cs, args.server).lock()
+    update_kwargs = {}
+    if 'reason' in args and args.reason is not None:
+        update_kwargs['reason'] = args.reason
+
+    server = _find_server(cs, args.server)
+    server.lock(**update_kwargs)
 
 
 @utils.arg('server', metavar='<server>', help=_('Name or ID of server.'))
@@ -2233,9 +2339,25 @@ def do_shelve_offload(cs, args):
 
 
 @utils.arg('server', metavar='<server>', help=_('Name or ID of server.'))
+@utils.arg(
+    '--availability-zone',
+    metavar='<availability-zone>',
+    default=None,
+    dest='availability_zone',
+    help=_('Name of the availability zone in which to unshelve a '
+           'SHELVED_OFFLOADED server.'),
+    start_version='2.77')
 def do_unshelve(cs, args):
     """Unshelve a server."""
-    _find_server(cs, args.server).unshelve()
+    update_kwargs = {}
+    # Microversion >= 2.77 will support user to specify an
+    # availability_zone to unshelve a shelve offloaded server.
+    if cs.api_version >= api_versions.APIVersion('2.77'):
+        if 'availability_zone' in args and args.availability_zone is not None:
+            update_kwargs['availability_zone'] = args.availability_zone
+
+    server = _find_server(cs, args.server)
+    server.unshelve(**update_kwargs)
 
 
 @utils.arg('server', metavar='<server>', help=_('Name or ID of server.'))
@@ -2243,6 +2365,17 @@ def do_diagnostics(cs, args):
     """Retrieve server diagnostics."""
     server = _find_server(cs, args.server)
     utils.print_dict(cs.servers.diagnostics(server)[1], wrap=80)
+
+
+@api_versions.wraps("2.78")
+@utils.arg('server', metavar='<server>', help=_('Name or ID of server.'))
+def do_server_topology(cs, args):
+    """Retrieve server topology."""
+    server = _find_server(cs, args.server)
+    # This prints a dict with only two properties: nodes and pagesize_kb
+    # nodes is a list of dicts so it does not print very well, it's just a
+    # json blob in the output.
+    utils.print_dict(cs.servers.topology(server), wrap=80)
 
 
 @utils.arg(
@@ -2381,7 +2514,7 @@ def _print_server(cs, args, server=None, wrap=0):
     try:
         networks = server.networks
     except Exception as e:
-        raise exceptions.CommandError(six.text_type(e))
+        raise exceptions.CommandError(str(e))
 
     info = server.to_dict()
     for network_label, address_list in networks.items():
@@ -2437,6 +2570,7 @@ def _print_server(cs, args, server=None, wrap=0):
 
     info.pop('links', None)
     info.pop('addresses', None)
+    info.pop('OS-EXT-SRV-ATTR:user_data', None)
 
     utils.print_dict(info, wrap=wrap)
 
@@ -2490,7 +2624,7 @@ def _find_server(cs, server, raise_if_notfound=True, **find_args):
             return utils.find_resource(cs.servers, server,
                                        wrap_exception=False)
         except exceptions.NoUniqueMatch as e:
-            raise exceptions.CommandError(six.text_type(e))
+            raise exceptions.CommandError(str(e))
         except exceptions.NotFound:
             # The server can be deleted
             return server
@@ -2501,7 +2635,15 @@ def _find_image(cs, image):
     try:
         return cs.glance.find_image(image)
     except (exceptions.NotFound, exceptions.NoUniqueMatch) as e:
-        raise exceptions.CommandError(six.text_type(e))
+        raise exceptions.CommandError(str(e))
+
+
+def _find_images(cs, images):
+    """Get images by name or ID."""
+    try:
+        return cs.glance.find_images(images)
+    except (exceptions.NotFound, exceptions.NoUniqueMatch) as e:
+        raise exceptions.CommandError(str(e))
 
 
 def _find_flavor(cs, flavor):
@@ -2517,7 +2659,7 @@ def _find_network_id(cs, net_name):
     try:
         return cs.neutron.find_network(net_name).id
     except (exceptions.NotFound, exceptions.NoUniqueMatch) as e:
-        raise exceptions.CommandError(six.text_type(e))
+        raise exceptions.CommandError(str(e))
 
 
 def _print_volume(volume):
@@ -2554,6 +2696,13 @@ def _translate_volume_attachments_keys(collection):
     default=None,
     help=_('Tag for the attached volume.'),
     start_version="2.49")
+@utils.arg(
+    '--delete-on-termination',
+    action='store_true',
+    default=False,
+    help=_('Specify if the attached volume should be deleted '
+           'when the server is destroyed.'),
+    start_version="2.79")
 def do_volume_attach(cs, args):
     """Attach a volume to a server."""
     if args.device == 'auto':
@@ -2562,6 +2711,9 @@ def do_volume_attach(cs, args):
     update_kwargs = {}
     if 'tag' in args and args.tag:
         update_kwargs['tag'] = args.tag
+
+    if 'delete_on_termination' in args and args.delete_on_termination:
+        update_kwargs['delete_on_termination'] = args.delete_on_termination
 
     volume = cs.volumes.create_server_volume(_find_server(cs, args.server).id,
                                              args.volume,
@@ -2576,22 +2728,44 @@ def do_volume_attach(cs, args):
     help=_('Name or ID of server.'))
 @utils.arg(
     'src_volume',
-    metavar='<src_volid>',
+    metavar='<src_volume>',
     help=_('ID of the source (original) volume.'))
 @utils.arg(
     'dest_volume',
-    metavar='<dest_volid>',
+    metavar='<dest_volume>',
     help=_('ID of the destination volume.'))
+@utils.arg(
+    '--delete-on-termination',
+    default=None,
+    group='delete_on_termination',
+    action='store_true',
+    help=_('Specify that the volume should be deleted '
+           'when the server is destroyed.'),
+    start_version='2.85')
+@utils.arg(
+    '--no-delete-on-termination',
+    group='delete_on_termination',
+    action='store_false',
+    help=_('Specify that the volume should not be deleted '
+           'when the server is destroyed.'),
+    start_version='2.85')
 def do_volume_update(cs, args):
     """Update the attachment on the server.
 
-    Migrates the data from an attached volume to the
-    specified available volume and swaps out the active
-    attachment to the new volume.
+    If dest_volume is the same as the src_volume then the command migrates
+    the data from the attached volume to the specified available volume
+    and swaps out the active attachment to the new volume. Otherwise it
+    only updates the parameters of the existing attachment.
     """
+    kwargs = dict()
+    if (cs.api_version >= api_versions.APIVersion('2.85') and
+            args.delete_on_termination is not None):
+        kwargs['delete_on_termination'] = args.delete_on_termination
+
     cs.volumes.update_server_volume(_find_server(cs, args.server).id,
                                     args.src_volume,
-                                    args.dest_volume)
+                                    args.dest_volume,
+                                    **kwargs)
 
 
 @utils.arg(
@@ -2620,6 +2794,9 @@ def do_volume_attachments(cs, args):
     fields = ['ID', 'DEVICE', 'SERVER ID', 'VOLUME ID']
     if cs.api_version >= api_versions.APIVersion('2.70'):
         fields.append('TAG')
+    # Microversion >= 2.79 returns the delete_on_termination value.
+    if cs.api_version >= api_versions.APIVersion('2.79'):
+        fields.append('DELETE ON TERMINATION')
     utils.print_list(volumes, fields)
 
 
@@ -3026,11 +3203,10 @@ def _print_absolute_limits(limits):
 
     limit_list = []
     for name in limit_names:
-        l = Limit(name,
-                  used.get(name, "-"),
-                  max.get(name, "-"),
-                  other.get(name, "-"))
-        limit_list.append(l)
+        limit_list.append(Limit(
+            name, used.get(name, '-'), max.get(name, '-'),
+            other.get(name, '-'),
+        ))
 
     utils.print_list(limit_list, columns)
 
@@ -3439,6 +3615,21 @@ def _print_aggregate_details(cs, aggregate):
     utils.print_list([aggregate], columns, formatters=formatters)
 
 
+@api_versions.wraps("2.81")
+@utils.arg(
+    'aggregate', metavar='<aggregate>',
+    help=_('Name or ID of the aggregate.'))
+@utils.arg(
+    'images', metavar='<image>', nargs='+',
+    help=_('Name or ID of image(s) to cache on the hosts within '
+           'the aggregate.'))
+def do_aggregate_cache_images(cs, args):
+    """Request images be cached."""
+    aggregate = _find_aggregate(cs, args.aggregate)
+    images = _find_images(cs, args.images)
+    cs.aggregates.cache_images(aggregate, images)
+
+
 @utils.arg('server', metavar='<server>', help=_('Name or ID of server.'))
 @utils.arg(
     'host', metavar='<host>', default=None, nargs='?',
@@ -3517,6 +3708,10 @@ def do_server_migration_list(cs, args):
     format_key = ["memory_total_bytes", "memory_processed_bytes",
                   "memory_remaining_bytes", "disk_total_bytes",
                   "disk_processed_bytes", "disk_remaining_bytes"]
+
+    if cs.api_version >= api_versions.APIVersion("2.80"):
+        fields.append("Project ID")
+        fields.append("User ID")
 
     formatters = map(lambda field: utils.make_field_formatter(field)[1],
                      format_key)
@@ -4834,33 +5029,6 @@ def do_server_tag_delete_all(cs, args):
     server.delete_all_tags()
 
 
-@utils.arg(
-    'cell',
-    metavar='<cell-name>',
-    help=_('Name of the cell.'))
-def do_cell_show(cs, args):
-    """Show details of a given cell."""
-    cell = cs.cells.get(args.cell)
-    utils.print_dict(cell.to_dict())
-
-
-@utils.arg(
-    '--cell',
-    metavar='<cell-name>',
-    help=_("Name of the cell to get the capacities."),
-    default=None)
-def do_cell_capacities(cs, args):
-    """Get cell capacities for all cells or a given cell."""
-    cell = cs.cells.capacities(args.cell)
-    print(_("Ram Available: %s MiB") % cell.capacities['ram_free']['total_mb'])
-    utils.print_dict(cell.capacities['ram_free']['units_by_mb'],
-                     dict_property='Ram(MiB)', dict_value="Units")
-    print(_("\nDisk Available: %s MiB") %
-          cell.capacities['disk_free']['total_mb'])
-    utils.print_dict(cell.capacities['disk_free']['units_by_mb'],
-                     dict_property='Disk(MiB)', dict_value="Units")
-
-
 @utils.arg('server', metavar='<server>', help='Name or ID of server.')
 def do_force_delete(cs, args):
     """Force delete a server."""
@@ -5282,15 +5450,6 @@ def do_instance_action_list(cs, args):
                      sortby_index=3)
 
 
-def do_list_extensions(cs, _args):
-    """
-    List all the os-api extensions that are available.
-    """
-    extensions = cs.list_extensions.show_all()
-    fields = ["Name", "Summary", "Alias", "Updated"]
-    utils.print_list(extensions, fields)
-
-
 @utils.arg('host', metavar='<host>',
            help='The hypervisor hostname (or pattern) to search for. '
                 'WARNING: Use a fully qualified domain name if you only '
@@ -5348,6 +5507,10 @@ def _print_migrations(cs, migrations):
         fields.append("Type")
         formatters.update({"Type": migration_type})
 
+    if cs.api_version >= api_versions.APIVersion("2.80"):
+        fields.append("Project ID")
+        fields.append("User ID")
+
     utils.print_list(migrations, fields, formatters)
 
 
@@ -5361,16 +5524,29 @@ def _print_migrations(cs, migrations):
     '--host',
     dest='host',
     metavar='<host>',
-    help=_('Fetch migrations for the given host.'))
+    help=_('Fetch migrations for the given source or destination host.'))
 @utils.arg(
     '--status',
     dest='status',
     metavar='<status>',
     help=_('Fetch migrations for the given status.'))
+@utils.arg(
+    '--migration-type',
+    dest='migration_type',
+    metavar='<migration_type>',
+    help=_('Filter migrations by type. Valid values are: evacuation, '
+           'live-migration, migration (cold), resize'))
+@utils.arg(
+    '--source-compute',
+    dest='source_compute',
+    metavar='<source_compute>',
+    help=_('Filter migrations by source compute host name.'))
 def do_migration_list(cs, args):
     """Print a list of migrations."""
     migrations = cs.migrations.list(args.host, args.status,
-                                    instance_uuid=args.instance_uuid)
+                                    instance_uuid=args.instance_uuid,
+                                    migration_type=args.migration_type,
+                                    source_compute=args.source_compute)
     _print_migrations(cs, migrations)
 
 
@@ -5384,12 +5560,23 @@ def do_migration_list(cs, args):
     '--host',
     dest='host',
     metavar='<host>',
-    help=_('Fetch migrations for the given host.'))
+    help=_('Fetch migrations for the given source or destination host.'))
 @utils.arg(
     '--status',
     dest='status',
     metavar='<status>',
     help=_('Fetch migrations for the given status.'))
+@utils.arg(
+    '--migration-type',
+    dest='migration_type',
+    metavar='<migration_type>',
+    help=_('Filter migrations by type. Valid values are: evacuation, '
+           'live-migration, migration (cold), resize'))
+@utils.arg(
+    '--source-compute',
+    dest='source_compute',
+    metavar='<source_compute>',
+    help=_('Filter migrations by source compute host name.'))
 @utils.arg(
     '--marker',
     dest='marker',
@@ -5428,7 +5615,9 @@ def do_migration_list(cs, args):
     migrations = cs.migrations.list(args.host, args.status,
                                     instance_uuid=args.instance_uuid,
                                     marker=args.marker, limit=args.limit,
-                                    changes_since=args.changes_since)
+                                    changes_since=args.changes_since,
+                                    migration_type=args.migration_type,
+                                    source_compute=args.source_compute)
     # TODO(yikun): Output a "Marker" column if there is a next link?
     _print_migrations(cs, migrations)
 
@@ -5443,12 +5632,23 @@ def do_migration_list(cs, args):
     '--host',
     dest='host',
     metavar='<host>',
-    help=_('Fetch migrations for the given host.'))
+    help=_('Fetch migrations for the given source or destination host.'))
 @utils.arg(
     '--status',
     dest='status',
     metavar='<status>',
     help=_('Fetch migrations for the given status.'))
+@utils.arg(
+    '--migration-type',
+    dest='migration_type',
+    metavar='<migration_type>',
+    help=_('Filter migrations by type. Valid values are: evacuation, '
+           'live-migration, migration (cold), resize'))
+@utils.arg(
+    '--source-compute',
+    dest='source_compute',
+    metavar='<source_compute>',
+    help=_('Filter migrations by source compute host name.'))
 @utils.arg(
     '--marker',
     dest='marker',
@@ -5484,6 +5684,20 @@ def do_migration_list(cs, args):
            'of time. The provided time should be an ISO 8061 formatted time. '
            'e.g. 2016-03-04T06:27:59Z .'),
     start_version="2.66")
+@utils.arg(
+    '--project-id',
+    dest='project_id',
+    metavar='<project_id>',
+    default=None,
+    help=_('Filter the migrations by the given project ID.'),
+    start_version='2.80')
+@utils.arg(
+    '--user-id',
+    dest='user_id',
+    metavar='<user_id>',
+    default=None,
+    help=_('Filter the migrations by the given user ID.'),
+    start_version='2.80')
 def do_migration_list(cs, args):
     """Print a list of migrations."""
     if args.changes_since:
@@ -5500,11 +5714,20 @@ def do_migration_list(cs, args):
             raise exceptions.CommandError(_('Invalid changes-before value: %s')
                                           % args.changes_before)
 
-    migrations = cs.migrations.list(args.host, args.status,
-                                    instance_uuid=args.instance_uuid,
-                                    marker=args.marker, limit=args.limit,
-                                    changes_since=args.changes_since,
-                                    changes_before=args.changes_before)
+    kwargs = dict(
+        instance_uuid=args.instance_uuid,
+        marker=args.marker,
+        limit=args.limit,
+        changes_since=args.changes_since,
+        changes_before=args.changes_before,
+        migration_type=args.migration_type,
+        source_compute=args.source_compute)
+
+    if cs.api_version >= api_versions.APIVersion('2.80'):
+        kwargs['project_id'] = args.project_id
+        kwargs['user_id'] = args.user_id
+
+    migrations = cs.migrations.list(args.host, args.status, **kwargs)
     _print_migrations(cs, migrations)
 
 

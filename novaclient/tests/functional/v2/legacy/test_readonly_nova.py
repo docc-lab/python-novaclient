@@ -85,9 +85,6 @@ class SimpleReadOnlyNovaClientTest(base.ClientTestBase):
     def test_admin_help(self):
         self.nova('help')
 
-    def test_admin_list_extensions(self):
-        self.nova('list-extensions')
-
     def test_agent_list(self):
         self.nova('agent-list')
         self.nova('agent-list', flags='--debug')

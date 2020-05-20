@@ -73,6 +73,10 @@ nova usage
 ``aggregate-add-host``
   Add the host to the specified aggregate.
 
+``aggregate-cache-images``
+  Request images be pre-cached on hosts within an aggregate.
+  (Supported by API versions '2.81' - '2.latest')
+
 ``aggregate-create``
   Create a new aggregate with the specified
   details.
@@ -107,13 +111,6 @@ nova usage
 
 ``boot``
   Boot a new server.
-
-``cell-capacities``
-  Get cell capacities for all cells or a given
-  cell.
-
-``cell-show``
-  Show details of a given cell.
 
 ``clear-password``
   Clear the admin password for a server from the
@@ -309,10 +306,6 @@ nova usage
 ``list``
   List servers.
 
-``list-extensions``
-  List all the os-api extensions that are
-  available.
-
 ``list-secgroup``
   List Security Group(s) of a server.
 
@@ -472,6 +465,10 @@ nova usage
   '--os-compute-api-version' flag to show help
   message for proper version]
 
+``server-topology``
+  Retrieve NUMA topology of the given server.
+  (Supported by API versions '2.78' - '2.latest')
+
 ``service-delete``
   Delete the service.
 
@@ -561,10 +558,12 @@ nova usage
   Detach a volume from a server.
 
 ``volume-update``
-  Update the attachment on the server. Migrates
-  the data from an attached volume to the
-  specified available volume and swaps out the
-  active attachment to the new volume.
+  Update the attachment on the server. Migrates the data from an
+  attached volume to the specified available volume and swaps out
+  the active attachment to the new volume.
+  Since microversion 2.85, support for updating the
+  ``delete_on_termination`` delete flag, which allows changing the
+  behavior of volume deletion on instance deletion.
 
 ``x509-create-cert``
   **DEPRECATED** Create x509 cert for a user in
@@ -764,6 +763,28 @@ Add the host to the specified aggregate.
 ``<host>``
   The host to add to the aggregate.
 
+.. _nova_aggregate-cache-images:
+
+nova aggregate-cache-images
+---------------------------
+
+.. code-block:: console
+
+   usage: nova aggregate-cache-images <aggregate> <image> [<image> ..]
+
+Request image(s) be pre-cached on hosts within the aggregate.
+(Supported by API versions '2.81' - '2.latest')
+
+.. versionadded:: 16.0.0
+
+**Positional arguments:**
+
+``<aggregate>``
+  Name or ID of aggregate.
+
+``<image>``
+  Name or ID of image(s) to cache.
+
 .. _nova_aggregate-create:
 
 nova aggregate-create
@@ -952,6 +973,8 @@ nova boot
                     [--description <description>] [--tags <tags>]
                     [--return-reservation-id]
                     [--trusted-image-certificate-id <trusted-image-certificate-id>]
+                    [--host <host>]
+                    [--hypervisor-hostname <hypervisor-hostname>]
                     <name>
 
 Boot a new server.
@@ -1084,7 +1107,8 @@ quality of service support, microversion ``2.72`` is required.
   versions '2.42' - '2.latest')
 
 ``--config-drive <value>``
-  Enable config drive.
+  Enable config drive. The value must be a
+  boolean value.
 
 ``--poll``
   Report the new server boot progress until it
@@ -1117,37 +1141,13 @@ quality of service support, microversion ``2.72`` is required.
   May be specified multiple times to pass multiple trusted image
   certificate IDs. (Supported by API versions '2.63' - '2.latest')
 
-.. _nova_cell-capacities:
+``--host <host>``
+  Requested host to create servers. Admin only by default.
+  (Supported by API versions '2.74' - '2.latest')
 
-nova cell-capacities
---------------------
-
-.. code-block:: console
-
-   usage: nova cell-capacities [--cell <cell-name>]
-
-Get cell capacities for all cells or a given cell.
-
-**Optional arguments:**
-
-``--cell <cell-name>``
-  Name of the cell to get the capacities.
-
-.. _nova_cell-show:
-
-nova cell-show
---------------
-
-.. code-block:: console
-
-   usage: nova cell-show <cell-name>
-
-Show details of a given cell.
-
-**Positional arguments:**
-
-``<cell-name>``
-  Name of the cell.
+``--hypervisor-hostname <hypervisor-hostname>``
+  Requested hypervisor hostname to create servers. Admin only by default.
+  (Supported by API versions '2.74' - '2.latest')
 
 .. _nova_clear-password:
 
@@ -1258,7 +1258,7 @@ nova evacuate
 
 .. code-block:: console
 
-   usage: nova evacuate [--password <password>] [--force] <server> [<host>]
+   usage: nova evacuate [--password <password>] [--on-shared-storage] [--force] <server> [<host>]
 
 Evacuate server from failed host.
 
@@ -1277,6 +1277,10 @@ Evacuate server from failed host.
   Set the provided admin password on the evacuated
   server. Not applicable if the server is on shared
   storage.
+
+``--on-shared-storage``
+  Specifies whether server files are located on shared
+  storage. (Supported by API versions '2.0' - '2.13')
 
 ``--force``
   Force an evacuation by not verifying the provided destination host by the
@@ -1824,11 +1828,13 @@ List hypervisors. (Supported by API versions '2.0' - '2.latest') [hint: use
 ``--marker <marker>``
   The last hypervisor of the previous page; displays
   list of hypervisors after "marker".
+  (Supported by API versions '2.33' - '2.latest')
 
 ``--limit <limit>``
   Maximum number of hypervisors to display. If limit is
   bigger than 'CONF.api.max_limit' option of Nova API,
   limit 'CONF.api.max_limit' will be used instead.
+  (Supported by API versions '2.33' - '2.latest')
 
 .. _nova_hypervisor-servers:
 
@@ -2214,15 +2220,20 @@ nova list
 
    usage: nova list [--reservation-id <reservation-id>] [--ip <ip-regexp>]
                     [--ip6 <ip6-regexp>] [--name <name-regexp>]
-                    [--instance-name <name-regexp>] [--status <status>]
-                    [--flavor <flavor>] [--image <image>] [--host <hostname>]
-                    [--all-tenants [<0|1>]] [--tenant [<tenant>]]
-                    [--user [<user>]] [--deleted] [--fields <fields>] [--minimal]
+                    [--status <status>] [--flavor <flavor>] [--image <image>]
+                    [--host <hostname>] [--all-tenants [<0|1>]]
+                    [--tenant [<tenant>]] [--user [<user>]] [--deleted]
+                    [--fields <fields>] [--minimal]
                     [--sort <key>[:<direction>]] [--marker <marker>]
-                    [--limit <limit>] [--changes-since <changes_since>]
+                    [--limit <limit>] [--availability-zone <availability_zone>]
+                    [--key-name <key_name>] [--[no-]config-drive]
+                    [--progress <progress>] [--vm-state <vm_state>]
+                    [--task-state <task_state>] [--power-state <power_state>]
+                    [--changes-since <changes_since>]
                     [--changes-before <changes_before>]
                     [--tags <tags>] [--tags-any <tags-any>]
                     [--not-tags <not-tags>] [--not-tags-any <not-tags-any>]
+                    [--locked]
 
 List servers.
 
@@ -2245,10 +2256,6 @@ present in the failure domain.
 
 ``--name <name-regexp>``
   Search with regular expression match by name.
-
-``--instance-name <name-regexp>``
-  Search with regular expression match by server
-  name.
 
 ``--status <status>``
   Search by server status.
@@ -2273,7 +2280,7 @@ present in the failure domain.
 
 ``--user [<user>]``
   Display information from single user (Admin
-  only).
+  only until microversion 2.82).
 
 ``--deleted``
   Only display deleted servers (Admin only).
@@ -2302,6 +2309,40 @@ present in the failure domain.
   is bigger than 'CONF.api.max_limit' option of
   Nova API, limit 'CONF.api.max_limit' will be
   used instead.
+
+``--availability-zone <availability_zone>``
+  Display servers based on their availability zone
+  (Admin only until microversion 2.82).
+
+``--key-name <key_name>``
+  Display servers based on their keypair name
+  (Admin only until microversion 2.82).
+
+``--config-drive``
+  Display servers that have a config drive attached.
+  It is mutually exclusive with '--no-config-drive'.
+  (Admin only until microversion 2.82).
+
+``--no-config-drive``
+  Display servers that do not have a config drive attached.
+  It is mutually exclusive with '--config-drive'.
+  (Admin only until microversion 2.82).
+
+``--progress <progress>``
+  Display servers based on their progress value
+  (Admin only until microversion 2.82).
+
+``--vm-state <vm_state>``
+  Display servers based on their vm_state value
+  (Admin only until microversion 2.82).
+
+``--task-state <task_state>``
+  Display servers based on their task_state value
+  (Admin only until microversion 2.82).
+
+``--power-state <power_state>``
+  Display servers based on their power_state value
+  (Admin only until microversion 2.82).
 
 ``--changes-since <changes_since>``
   List only servers changed later or equal to a
@@ -2348,16 +2389,12 @@ present in the failure domain.
   commas: --not-tags-any <tag1,tag2> (Supported
   by API versions '2.26' - '2.latest')
 
-.. _nova_list-extensions:
-
-nova list-extensions
---------------------
-
-.. code-block:: console
-
-   usage: nova list-extensions
-
-List all the os-api extensions that are available.
+``--locked <locked>``
+  Display servers based on their locked value. A
+  value must be specified; eg. 'true' will list
+  only locked servers and 'false' will list only
+  unlocked servers. (Supported by API versions
+  '2.73' - '2.latest')
 
 .. _nova_list-secgroup:
 
@@ -2468,7 +2505,7 @@ nova lock
 
 .. code-block:: console
 
-   usage: nova lock <server>
+   usage: nova lock [--reason <reason>] <server>
 
 Lock a server. A normal (non-admin) user will not be able to execute actions
 on a locked server.
@@ -2477,6 +2514,12 @@ on a locked server.
 
 ``<server>``
   Name or ID of server.
+
+**Optional arguments:**
+
+``--reason <reason>``
+  Reason for locking the server. (Supported by API versions
+  '2.73' - '2.latest')
 
 .. _nova_meta:
 
@@ -2531,12 +2574,27 @@ nova migration-list
 
 .. code-block:: console
 
-   usage: nova migration-list [--instance-uuid <instance_uuid>] [--host <host>]
-                              [--status <status>] [--marker <marker>]
-                              [--limit <limit>] [--changes-since <changes_since>]
+   usage: nova migration-list [--instance-uuid <instance_uuid>]
+                              [--host <host>]
+                              [--status <status>]
+                              [--migration-type <migration_type>]
+                              [--source-compute <source_compute>]
+                              [--marker <marker>]
+                              [--limit <limit>]
+                              [--changes-since <changes_since>]
                               [--changes-before <changes_before>]
+                              [--project-id <project_id>]
+                              [--user-id <user_id>]
 
 Print a list of migrations.
+
+**Examples**
+
+To see the list of evacuation operations *from* a compute service host:
+
+.. code-block:: console
+
+  nova migration-list --migration-type evacuation --source-compute host.foo.bar
 
 **Optional arguments:**
 
@@ -2544,10 +2602,24 @@ Print a list of migrations.
   Fetch migrations for the given instance.
 
 ``--host <host>``
-  Fetch migrations for the given host.
+  Fetch migrations for the given source or destination host.
 
 ``--status <status>``
   Fetch migrations for the given status.
+
+``--migration-type <migration_type>``
+  Filter migrations by type. Valid values are:
+
+  * evacuation
+  * live-migration
+  * migration
+
+    .. note:: This is a cold migration.
+
+  * resize
+
+``--source-compute <source_compute>``
+  Filter migrations by source compute host name.
 
 ``--marker <marker>``
   The last migration of the previous page; displays list of migrations after
@@ -2569,6 +2641,14 @@ Print a list of migrations.
   List only migrations changed earlier or equal to a certain
   point of time. The provided time should be an ISO 8061 formatted time.
   e.g. 2016-03-04T06:27:59Z . (Supported by API versions '2.66' - '2.latest')
+
+``--project-id <project_id>``
+  Filter the migrations by the given project ID.
+  (Supported by API versions '2.80' - '2.latest')
+
+``--user-id <user_id>``
+  Filter the migrations by the given user ID.
+  (Supported by API versions '2.80' - '2.latest')
 
 .. _nova_pause:
 
@@ -3309,6 +3389,26 @@ version]
 ``<tags>``
   Tag(s) to set.
 
+.. _nova_server_topology:
+
+nova server-topology
+--------------------
+
+.. code-block:: console
+
+   usage: nova server-topology <server>
+
+Retrieve server NUMA topology information. Host specific fields are only
+visible to users with the administrative role.
+(Supported by API versions '2.78' - '2.latest')
+
+.. versionadded:: 15.1.0
+
+**Positional arguments:**
+
+``<server>``
+  Name or ID of server.
+
 .. _nova_service-delete:
 
 nova service-delete
@@ -3673,7 +3773,7 @@ nova unshelve
 
 .. code-block:: console
 
-   usage: nova unshelve <server>
+   usage: nova unshelve [--availability-zone <availability_zone>] <server>
 
 Unshelve a server.
 
@@ -3681,6 +3781,12 @@ Unshelve a server.
 
 ``<server>``
   Name or ID of server.
+
+**Optional arguments:**
+
+``--availability-zone <availability_zone>``
+  Name of the availability zone in which to unshelve a ``SHELVED_OFFLOADED``
+  server. (Supported by API versions '2.77' - '2.latest')
 
 .. _nova_update:
 
@@ -3771,7 +3877,8 @@ nova volume-attach
 
 .. code-block:: console
 
-   usage: nova volume-attach [--tag <tag>] <server> <volume> [<device>]
+   usage: nova volume-attach [--delete-on-termination] [--tag <tag>]
+                             <server> <volume> [<device>]
 
 Attach a volume to a server.
 
@@ -3791,6 +3898,11 @@ Attach a volume to a server.
 
 ``--tag <tag>``
   Tag for the attached volume. (Supported by API versions '2.49' - '2.latest')
+
+``--delete-on-termination``
+  Specify if the attached volume should be deleted when the server is
+  destroyed. By default the attached volume is not deleted when the server is
+  destroyed. (Supported by API versions '2.79' - '2.latest')
 
 .. _nova_volume-attachments:
 
@@ -3834,7 +3946,8 @@ nova volume-update
 
 .. code-block:: console
 
-   usage: nova volume-update <server> <src_volid> <dest_volid>
+   usage: nova volume-update [--[no-]delete-on-termination]
+                             <server> <src_volume> <dest_volume>
 
 Update the attachment on the server. Migrates the data from an attached volume
 to the specified available volume and swaps out the active attachment to the
@@ -3845,11 +3958,23 @@ new volume.
 ``<server>``
   Name or ID of server.
 
-``<src_volid>``
+``<src_volume>``
   ID of the source (original) volume.
 
-``<dest_volid>``
+``<dest_volume>``
   ID of the destination volume.
+
+**Optional arguments:**
+
+``--delete-on-termination``
+  Specify that the volume should be deleted when the server is destroyed.
+  It is mutually exclusive with '--no-delete-on-termination'.
+  (Supported by API versions '2.85' - '2.latest')
+
+``--no-delete-on-termination``
+  Specify that the attached volume should not be deleted when
+  the server is destroyed. It is mutually exclusive with '--delete-on-termination'.
+  (Supported by API versions '2.85' - '2.latest')
 
 .. _nova_bash-completion:
 

@@ -14,9 +14,9 @@
 #    under the License.
 
 import copy
+from unittest import mock
 
 from keystoneauth1 import session
-import mock
 from oslo_utils import uuidutils
 
 import novaclient.api_versions
@@ -24,26 +24,6 @@ import novaclient.client
 import novaclient.extension
 from novaclient.tests.unit import utils
 import novaclient.v2.client
-
-
-class ClientTest(utils.TestCase):
-    def test_get_client_class_v2(self):
-        output = novaclient.client.get_client_class('2')
-        self.assertEqual(output, novaclient.v2.client.Client)
-
-    def test_get_client_class_v2_int(self):
-        output = novaclient.client.get_client_class(2)
-        self.assertEqual(output, novaclient.v2.client.Client)
-
-    def test_get_client_class_unknown(self):
-        self.assertRaises(novaclient.exceptions.UnsupportedVersion,
-                          novaclient.client.get_client_class, '0')
-
-    def test_get_client_class_latest(self):
-        self.assertRaises(novaclient.exceptions.UnsupportedVersion,
-                          novaclient.client.get_client_class, 'latest')
-        self.assertRaises(novaclient.exceptions.UnsupportedVersion,
-                          novaclient.client.get_client_class, '2.latest')
 
 
 class SessionClientTest(utils.TestCase):

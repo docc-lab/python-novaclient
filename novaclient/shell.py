@@ -18,7 +18,6 @@
 Command-line interface to the OpenStack Nova API.
 """
 
-from __future__ import print_function
 import argparse
 import logging
 import sys
@@ -27,7 +26,6 @@ from keystoneauth1 import loading
 from oslo_utils import encodeutils
 from oslo_utils import importutils
 from oslo_utils import strutils
-import six
 
 import novaclient
 from novaclient import api_versions
@@ -123,7 +121,7 @@ class DeprecatedAction(argparse.Action):
             # option
             self.real_action_args = False
             self.real_action = None
-        elif real_action is None or isinstance(real_action, six.string_types):
+        elif real_action is None or isinstance(real_action, str):
             # Specified by string (or None); we have to have a parser
             # to look up the actual action, so defer to later
             self.real_action_args = (option_strings, dest, help, kwargs)
@@ -367,26 +365,6 @@ class OpenStackComputeShell(object):
             help=_("Use this API endpoint instead of the Service Catalog. "
                    "Defaults to env[OS_ENDPOINT_OVERRIDE]."))
 
-        # NOTE(takashin): This dummy '--end' argument was added
-        # to avoid misinterpreting command line arguments.
-        # If there is not this dummy argument, the '--end' is interpreted to
-        # the '--endpoint-override'.
-        # TODO(takashin): Remove this dummy '--end' argument
-        # when the deprecated '--endpoint-override' argument is removed.
-        parser.add_argument(
-            '--end',
-            metavar='<end>',
-            nargs='?',
-            help=argparse.SUPPRESS)
-
-        parser.add_argument(
-            '--endpoint-override',
-            action=DeprecatedAction,
-            use=_('use "%s"; this option will be removed after Rocky '
-                  'OpenStack release.') % '--os-endpoint-override',
-            dest='endpoint_override',
-            help=argparse.SUPPRESS)
-
         if osprofiler_profiler:
             parser.add_argument('--profile',
                                 metavar='HMAC_KEY',
@@ -463,6 +441,7 @@ class OpenStackComputeShell(object):
 
             action_help = desc.strip()
             arguments = getattr(callback, 'arguments', [])
+            groups = {}
 
             subparser = subparsers.add_parser(
                 command,
@@ -477,10 +456,14 @@ class OpenStackComputeShell(object):
             )
             self.subcommands[command] = subparser
             for (args, kwargs) in arguments:
-                start_version = kwargs.get("start_version", None)
+                kwargs = kwargs.copy()
+
+                start_version = kwargs.pop("start_version", None)
+                end_version = kwargs.pop("end_version", None)
+                group = kwargs.pop("group", None)
+
                 if start_version:
                     start_version = api_versions.APIVersion(start_version)
-                    end_version = kwargs.get("end_version", None)
                     if end_version:
                         end_version = api_versions.APIVersion(end_version)
                     else:
@@ -492,10 +475,16 @@ class OpenStackComputeShell(object):
                             "end": end_version.get_string()})
                     if not version.matches(start_version, end_version):
                         continue
-                kw = kwargs.copy()
-                kw.pop("start_version", None)
-                kw.pop("end_version", None)
-                subparser.add_argument(*args, **kw)
+
+                if group:
+                    if group not in groups:
+                        groups[group] = (
+                            subparser.add_mutually_exclusive_group()
+                        )
+                    kwargs['dest'] = kwargs.get('dest', group)
+                    groups[group].add_argument(*args, **kwargs)
+                else:
+                    subparser.add_argument(*args, **kwargs)
             subparser.set_defaults(func=callback)
 
     def setup_debugging(self, debug):
@@ -830,10 +819,7 @@ def main():
         OpenStackComputeShell().main(argv)
     except Exception as exc:
         logger.debug(exc, exc_info=1)
-        if six.PY2:
-            message = encodeutils.safe_encode(six.text_type(exc))
-        else:
-            message = encodeutils.exception_to_unicode(exc)
+        message = encodeutils.exception_to_unicode(exc)
         print("ERROR (%(type)s): %(msg)s" % {
               'type': exc.__class__.__name__,
               'msg': message},

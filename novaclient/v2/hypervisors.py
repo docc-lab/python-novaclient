@@ -17,12 +17,12 @@
 Hypervisors interface
 """
 
-from oslo_utils import encodeutils
-import six
-from six.moves.urllib import parse
+from urllib import parse
 
 from novaclient import api_versions
 from novaclient import base
+from novaclient import exceptions
+from novaclient.i18n import _
 from novaclient import utils
 
 
@@ -70,10 +70,13 @@ class HypervisorManager(base.ManagerWithFind):
                        marker must be a UUID hypervisor ID.
                        (optional).
         :param limit: maximum number of hypervisors to return (optional).
+                      Note the API server has a configurable default limit.
+                      If no limit is specified here or limit is larger than
+                      default, the default limit will be used.
         """
         return self._list_base(detailed=detailed, marker=marker, limit=limit)
 
-    def search(self, hypervisor_match, servers=False):
+    def search(self, hypervisor_match, servers=False, detailed=False):
         """
         Get a list of matching hypervisors.
 
@@ -81,18 +84,23 @@ class HypervisorManager(base.ManagerWithFind):
             The hypervisor hosts are selected with the host name matching
             this pattern.
         :param servers: If True, server information is also retrieved.
+        :param detailed: If True, detailed hypervisor information is returned.
+            This requires API version 2.53 or greater.
         """
         # Starting with microversion 2.53, the /servers and /search routes are
         # deprecated and we get the same results using GET /os-hypervisors
         # using query parameters for the hostname pattern and servers.
-        if six.PY2:
-            hypervisor_match = encodeutils.safe_encode(hypervisor_match)
         if self.api_version >= api_versions.APIVersion('2.53'):
-            url = ('/os-hypervisors?hypervisor_hostname_pattern=%s' %
-                   parse.quote(hypervisor_match, safe=''))
+            url = ('/os-hypervisors%s?hypervisor_hostname_pattern=%s' %
+                   ('/detail' if detailed else '',
+                    parse.quote(hypervisor_match, safe='')))
             if servers:
                 url += '&with_servers=True'
         else:
+            if detailed:
+                raise exceptions.UnsupportedVersion(
+                    _('Parameter "detailed" requires API version 2.53 or '
+                      'greater.'))
             target = 'servers' if servers else 'search'
             url = ('/os-hypervisors/%s/%s' %
                    (parse.quote(hypervisor_match, safe=''), target))

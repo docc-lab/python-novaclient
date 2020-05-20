@@ -130,7 +130,7 @@ class TestServersDescription(base.ClientTestBase):
         output = self.nova("update %s --description '%s'" % (server.id, descr),
                            fail_ok=True, merge_stderr=True)
         self.assertIn("ERROR (BadRequest): Invalid input for field/attribute"
-                      " description. Value: %s. u\'%s\' is too long (HTTP 400)"
+                      " description. Value: %s. '%s' is too long (HTTP 400)"
                       % (descr, descr), output)
 
 
@@ -288,7 +288,7 @@ class TestServersDetailsFlavorInfo(base.ClientTestBase):
                 flavor_details, key)
             server_flavor_val = self._get_value_from_the_table(
                 server_details, flavor_key_mapping[key])
-            if key is "swap" and flavor_val is "":
+            if key == "swap" and flavor_val == "":
                 # "flavor-show" displays zero swap as empty string.
                 flavor_val = '0'
             self.assertEqual(flavor_val, server_flavor_val)
@@ -343,3 +343,44 @@ class TestInterfaceAttach(base.ClientTestBase):
         self.assertEqual(
             self.network.id,
             self._get_value_from_the_table(output, 'net_id'))
+
+
+class TestServeRebuildV274(base.ClientTestBase):
+
+    COMPUTE_API_VERSION = '2.74'
+    REBUILD_FIELDS = ["OS-DCF:diskConfig", "accessIPv4", "accessIPv6",
+                      "adminPass", "created", "description",
+                      "flavor", "hostId", "id", "image", "key_name",
+                      "locked", "locked_reason", "metadata", "name",
+                      "progress", "server_groups", "status", "tags",
+                      "tenant_id", "trusted_image_certificates", "updated",
+                      "user_data", "user_id"]
+
+    def test_rebuild(self):
+        server = self._create_server()
+        output = self.nova("rebuild %s %s" % (server.id, self.image.name))
+        for field in self.REBUILD_FIELDS:
+            self.assertIn(field, output)
+
+
+class TestServeRebuildV275(TestServeRebuildV274):
+
+    COMPUTE_API_VERSION = '2.75'
+    REBUILD_FIELDS_V275 = ['OS-EXT-AZ:availability_zone', 'config_drive',
+                           'OS-EXT-SRV-ATTR:host',
+                           'OS-EXT-SRV-ATTR:hypervisor_hostname',
+                           'OS-EXT-SRV-ATTR:instance_name',
+                           'OS-EXT-SRV-ATTR:hostname',
+                           'OS-EXT-SRV-ATTR:kernel_id',
+                           'OS-EXT-SRV-ATTR:launch_index',
+                           'OS-EXT-SRV-ATTR:ramdisk_id',
+                           'OS-EXT-SRV-ATTR:reservation_id',
+                           'OS-EXT-SRV-ATTR:root_device_name',
+                           'host_status',
+                           'OS-SRV-USG:launched_at',
+                           'OS-SRV-USG:terminated_at',
+                           'OS-EXT-STS:task_state', 'OS-EXT-STS:vm_state',
+                           'OS-EXT-STS:power_state', 'security_groups',
+                           'os-extended-volumes:volumes_attached']
+
+    REBUILD_FIELDS = TestServeRebuildV274.REBUILD_FIELDS + REBUILD_FIELDS_V275

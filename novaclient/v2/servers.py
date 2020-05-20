@@ -21,10 +21,7 @@ Server interface.
 
 import base64
 import collections
-
-from oslo_utils import encodeutils
-import six
-from six.moves.urllib import parse
+from urllib import parse
 
 from novaclient import api_versions
 from novaclient import base
@@ -214,6 +211,7 @@ class Server(base.Resource):
         """
         return self.manager.unpause(self)
 
+    @api_versions.wraps("2.0", "2.72")
     def lock(self):
         """
         Lock -- Lock the instance from certain operations.
@@ -221,6 +219,16 @@ class Server(base.Resource):
         :returns: An instance of novaclient.base.TupleWithMeta
         """
         return self.manager.lock(self)
+
+    @api_versions.wraps("2.73")
+    def lock(self, reason=None):
+        """
+        Lock -- Lock the instance from certain operations.
+
+        :param reason: (Optional) The lock reason.
+        :returns: An instance of novaclient.base.TupleWithMeta
+        """
+        return self.manager.lock(self, reason=reason)
 
     def unlock(self):
         """
@@ -280,6 +288,7 @@ class Server(base.Resource):
         """
         return self.manager.shelve_offload(self)
 
+    @api_versions.wraps("2.0", "2.76")
     def unshelve(self):
         """
         Unshelve -- Unshelve the server.
@@ -288,9 +297,26 @@ class Server(base.Resource):
         """
         return self.manager.unshelve(self)
 
+    @api_versions.wraps("2.77")
+    def unshelve(self, availability_zone=None):
+        """
+        Unshelve -- Unshelve the server.
+
+        :param availability_zone: The specified availability zone name
+                                  (Optional)
+        :returns: An instance of novaclient.base.TupleWithMeta
+        """
+        return self.manager.unshelve(self,
+                                     availability_zone=availability_zone)
+
     def diagnostics(self):
         """Diagnostics -- Retrieve server diagnostics."""
         return self.manager.diagnostics(self)
+
+    @api_versions.wraps("2.78")
+    def topology(self):
+        """Retrieve server topology."""
+        return self.manager.topology(self)
 
     @api_versions.wraps("2.0", "2.55")
     def migrate(self):
@@ -661,17 +687,11 @@ class ServerManager(base.BootingManagerWithFind):
 
         # NOTE(melwitt): Text file data is converted to bytes prior to
         # base64 encoding. The utf-8 encoding will fail for binary files.
-        if six.PY3:
-            try:
-                userdata = userdata.encode("utf-8")
-            except AttributeError:
-                # In python 3, 'bytes' object has no attribute 'encode'
-                pass
-        else:
-            try:
-                userdata = encodeutils.safe_encode(userdata)
-            except UnicodeDecodeError:
-                pass
+        try:
+            userdata = userdata.encode("utf-8")
+        except AttributeError:
+            # In python 3, 'bytes' object has no attribute 'encode'
+            pass
 
         return base64.b64encode(userdata).decode('utf-8')
 
@@ -683,7 +703,8 @@ class ServerManager(base.BootingManagerWithFind):
               block_device_mapping_v2=None, nics=None, scheduler_hints=None,
               config_drive=None, admin_pass=None, disk_config=None,
               access_ip_v4=None, access_ip_v6=None, description=None,
-              tags=None, trusted_image_certificates=None, **kwargs):
+              tags=None, trusted_image_certificates=None,
+              host=None, hypervisor_hostname=None, **kwargs):
         """
         Create (boot) a new server.
         """
@@ -731,7 +752,7 @@ class ServerManager(base.BootingManagerWithFind):
                 else:
                     data = file_or_string
 
-                if six.PY3 and isinstance(data, str):
+                if isinstance(data, str):
                     data = data.encode('utf-8')
                 cont = base64.b64encode(data).decode('utf-8')
                 personality.append({
@@ -761,7 +782,7 @@ class ServerManager(base.BootingManagerWithFind):
         if nics is not None:
             # With microversion 2.37+ nics can be an enum of 'auto' or 'none'
             # or a list of dicts.
-            if isinstance(nics, six.string_types):
+            if isinstance(nics, str):
                 all_net_data = nics
             else:
                 # NOTE(tr3buchet): nics can be an empty list
@@ -806,6 +827,12 @@ class ServerManager(base.BootingManagerWithFind):
             body['server']['trusted_image_certificates'] = (
                 trusted_image_certificates)
 
+        if host:
+            body['server']['host'] = host
+
+        if hypervisor_hostname:
+            body['server']['hypervisor_hostname'] = hypervisor_hostname
+
         return self._create('/servers', body, response_key,
                             return_raw=return_raw, **kwargs)
 
@@ -828,10 +855,14 @@ class ServerManager(base.BootingManagerWithFind):
             match the search_opts (optional). The search opts format is a
             dictionary of key / value pairs that will be appended to the query
             string.  For a complete list of keys see:
-            https://developer.openstack.org/api-ref/compute/#list-servers
+            https://docs.openstack.org/api-ref/compute/#list-servers
         :param marker: Begin returning servers that appear later in the server
                        list than that represented by this server id (optional).
         :param limit: Maximum number of servers to return (optional).
+                      Note the API server has a configurable default limit.
+                      If no limit is specified here or limit is larger than
+                      default, the default limit will be used.
+                      If limit == -1, all servers will be returned.
         :param sort_keys: List of sort keys
         :param sort_dirs: List of sort directions
 
@@ -851,12 +882,22 @@ class ServerManager(base.BootingManagerWithFind):
             search_opts = {}
 
         qparams = {}
-
+        # In microversion 2.73 we added ``locked`` filtering option
+        # for listing server details.
+        if ('locked' in search_opts and
+                self.api_version < api_versions.APIVersion('2.73')):
+            raise exceptions.UnsupportedAttribute("locked", "2.73")
         for opt, val in search_opts.items():
-            if val:
-                if isinstance(val, six.text_type):
+            # support locked=False from 2.73 microversion
+            if val or (opt == 'locked' and val is False):
+                if isinstance(val, str):
                     val = val.encode('utf-8')
                 qparams[opt] = val
+            # NOTE(gibi): The False value won't actually do anything until we
+            # fix bug 1871409 and clean up the API inconsistency, but we do it
+            # in preparation for that (hopefully backportable) fix
+            if opt == 'config_drive' and val is not None:
+                qparams[opt] = str(val)
 
         detail = ""
         if detailed:
@@ -1097,6 +1138,7 @@ class ServerManager(base.BootingManagerWithFind):
         """
         return self._action('unpause', server, None)
 
+    @api_versions.wraps("2.0", "2.72")
     def lock(self, server):
         """
         Lock the server.
@@ -1105,6 +1147,22 @@ class ServerManager(base.BootingManagerWithFind):
         :returns: An instance of novaclient.base.TupleWithMeta
         """
         return self._action('lock', server, None)
+
+    @api_versions.wraps("2.73")
+    def lock(self, server, reason=None):
+        """
+        Lock the server.
+
+        :param server: The :class:`Server` (or its ID) to lock
+        :param reason: (Optional) The lock reason.
+        :returns: An instance of novaclient.base.TupleWithMeta
+        """
+        info = None
+
+        if reason:
+            info = {'locked_reason': reason}
+
+        return self._action('lock', server, info)
 
     def unlock(self, server):
         """
@@ -1178,6 +1236,7 @@ class ServerManager(base.BootingManagerWithFind):
         """
         return self._action('shelveOffload', server, None)
 
+    @api_versions.wraps("2.0", "2.76")
     def unshelve(self, server):
         """
         Unshelve the server.
@@ -1186,6 +1245,21 @@ class ServerManager(base.BootingManagerWithFind):
         :returns: An instance of novaclient.base.TupleWithMeta
         """
         return self._action('unshelve', server, None)
+
+    @api_versions.wraps("2.77")
+    def unshelve(self, server, availability_zone=None):
+        """
+        Unshelve the server.
+
+        :param server: The :class:`Server` (or its ID) to unshelve
+        :param availability_zone: The specified availability zone name
+                                  (Optional)
+        :returns: An instance of novaclient.base.TupleWithMeta
+        """
+        info = None
+        if availability_zone:
+            info = {'availability_zone': availability_zone}
+        return self._action('unshelve', server, info)
 
     def ips(self, server):
         """
@@ -1213,6 +1287,19 @@ class ServerManager(base.BootingManagerWithFind):
                                          base.getid(server))
         return base.TupleWithMeta((resp, body), resp)
 
+    @api_versions.wraps("2.78")
+    def topology(self, server):
+        """
+        Retrieve server topology.
+
+        :param server: The :class:`Server` (or its ID) for which
+                       topology to be returned
+        :returns: An instance of novaclient.base.DictWithMeta
+        """
+        resp, body = self.api.client.get("/servers/%s/topology" %
+                                         base.getid(server))
+        return base.DictWithMeta(body, resp)
+
     def _validate_create_nics(self, nics):
         # nics are required with microversion 2.37+ and can be a string or list
         if self.api_version > api_versions.APIVersion('2.36'):
@@ -1230,7 +1317,9 @@ class ServerManager(base.BootingManagerWithFind):
                nics=None, scheduler_hints=None,
                config_drive=None, disk_config=None, admin_pass=None,
                access_ip_v4=None, access_ip_v6=None,
-               trusted_image_certificates=None, **kwargs):
+               trusted_image_certificates=None,
+               host=None, hypervisor_hostname=None,
+               **kwargs):
         # TODO(anthony): indicate in doc string if param is an extension
         # and/or optional
         """
@@ -1282,8 +1371,8 @@ class ServerManager(base.BootingManagerWithFind):
                       any networking for the server.
         :param scheduler_hints: (optional extension) arbitrary key-value pairs
                             specified by the client to help boot an instance
-        :param config_drive: (optional extension) value for config drive
-                            either boolean, or volume-id
+        :param config_drive: (optional extension) a boolean value to enable
+                             config drive
         :param disk_config: (optional extension) control how the disk is
                             partitioned when the server is created.  possible
                             values are 'AUTO' or 'MANUAL'.
@@ -1297,6 +1386,10 @@ class ServerManager(base.BootingManagerWithFind):
                      server as tags (allowed since microversion 2.52)
         :param trusted_image_certificates: A list of trusted certificate IDs
                                            (allowed since microversion 2.63)
+        :param host: requested host to create servers
+                     (allowed since microversion 2.74)
+        :param hypervisor_hostname: requested hypervisor hostname to create
+                                    servers (allowed since microversion 2.74)
         """
         if not min_count:
             min_count = 1
@@ -1351,6 +1444,15 @@ class ServerManager(base.BootingManagerWithFind):
                         "Block device volume_type is not supported before "
                         "microversion 2.67")
 
+        host_microversion = api_versions.APIVersion("2.74")
+        if host and self.api_version < host_microversion:
+            raise exceptions.UnsupportedAttribute("host", "2.74")
+        hypervisor_hostname_microversion = api_versions.APIVersion("2.74")
+        if (hypervisor_hostname and
+                self.api_version < hypervisor_hostname_microversion):
+            raise exceptions.UnsupportedAttribute(
+                "hypervisor_hostname", "2.74")
+
         boot_kwargs = dict(
             meta=meta, files=files, userdata=userdata,
             reservation_id=reservation_id, min_count=min_count,
@@ -1359,7 +1461,9 @@ class ServerManager(base.BootingManagerWithFind):
             scheduler_hints=scheduler_hints, config_drive=config_drive,
             disk_config=disk_config, admin_pass=admin_pass,
             access_ip_v4=access_ip_v4, access_ip_v6=access_ip_v6,
-            trusted_image_certificates=trusted_image_certificates, **kwargs)
+            trusted_image_certificates=trusted_image_certificates,
+            host=host, hypervisor_hostname=hypervisor_hostname,
+            **kwargs)
 
         if block_device_mapping:
             boot_kwargs['block_device_mapping'] = block_device_mapping

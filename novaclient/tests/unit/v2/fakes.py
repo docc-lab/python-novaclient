@@ -17,11 +17,10 @@
 import copy
 import datetime
 import re
+from unittest import mock
+from urllib import parse
 
-import mock
 from oslo_utils import strutils
-import six
-from six.moves.urllib import parse
 
 import novaclient
 from novaclient import api_versions
@@ -57,6 +56,48 @@ FAKE_RESPONSE_HEADERS = {'x-openstack-request-id': FAKE_REQUEST_ID}
 
 FAKE_SERVICE_UUID_1 = '75e9eabc-ed3b-4f11-8bba-add1e7e7e2de'
 FAKE_SERVICE_UUID_2 = '1f140183-c914-4ddf-8757-6df73028aa86'
+
+SERVER_TOPOLOGY = {
+    "nodes": [
+        {
+            "cpu_pinning": {
+                "0": 0,
+                "1": 5
+            },
+            "host_node": 0,
+            "memory_mb": 1024,
+            "siblings": [
+                [
+                    0,
+                    1
+                ]
+            ],
+            "vcpu_set": [
+                0,
+                1
+            ]
+        },
+        {
+            "cpu_pinning": {
+                "2": 1,
+                "3": 8
+            },
+            "host_node": 1,
+            "memory_mb": 2048,
+            "siblings": [
+                [
+                    2,
+                    3
+                ]
+            ],
+            "vcpu_set": [
+                2,
+                3
+            ]
+        }
+    ],
+    "pagesize_kb": 4
+}
 
 
 class FakeClient(fakes.FakeClient, client.Client):
@@ -285,53 +326,6 @@ class FakeSessionClient(base_client.SessionClient):
                       "version": "8.0",
                       "md5hash": "add6bb58e139be103324d04d82d8f546",
                       'id': 1}})
-
-    #
-    # List all extensions
-    #
-
-    def get_extensions(self, **kw):
-        exts = [
-            {
-                "alias": "NMN",
-                "description": "Multiple network support",
-                "links": [],
-                "name": "Multinic",
-                "namespace": ("http://docs.openstack.org/"
-                              "compute/ext/multinic/api/v1.1"),
-                "updated": "2011-06-09T00:00:00+00:00"
-            },
-            {
-                "alias": "OS-DCF",
-                "description": "Disk Management Extension",
-                "links": [],
-                "name": "DiskConfig",
-                "namespace": ("http://docs.openstack.org/"
-                              "compute/ext/disk_config/api/v1.1"),
-                "updated": "2011-09-27T00:00:00+00:00"
-            },
-            {
-                "alias": "OS-EXT-SRV-ATTR",
-                "description": "Extended Server Attributes support.",
-                "links": [],
-                "name": "ExtendedServerAttributes",
-                "namespace": ("http://docs.openstack.org/"
-                              "compute/ext/extended_status/api/v1.1"),
-                "updated": "2011-11-03T00:00:00+00:00"
-            },
-            {
-                "alias": "OS-EXT-STS",
-                "description": "Extended Status support",
-                "links": [],
-                "name": "ExtendedStatus",
-                "namespace": ("http://docs.openstack.org/"
-                              "compute/ext/extended_status/api/v1.1"),
-                "updated": "2011-11-03T00:00:00+00:00"
-            },
-        ]
-        return (200, FAKE_RESPONSE_HEADERS, {
-            "extensions": exts,
-        })
 
     #
     # Limits
@@ -738,6 +732,9 @@ class FakeSessionClient(base_client.SessionClient):
                 'rules': []}]
         })
 
+    def get_servers_1234_topology(self, **kw):
+        return 200, {}, SERVER_TOPOLOGY
+
     #
     # Server password
     #
@@ -774,8 +771,8 @@ class FakeSessionClient(base_client.SessionClient):
 
     none_actions = ['revertResize', 'os-stop', 'os-start',
                     'forceDelete', 'restore', 'pause', 'unpause', 'unlock',
-                    'unrescue', 'resume', 'suspend', 'lock', 'shelve',
-                    'shelveOffload', 'unshelve', 'resetNetwork']
+                    'unrescue', 'resume', 'suspend', 'shelve',
+                    'shelveOffload', 'resetNetwork']
     type_actions = ['os-getVNCConsole', 'os-getSPICEConsole',
                     'os-getRDPConsole']
 
@@ -836,6 +833,32 @@ class FakeSessionClient(base_client.SessionClient):
                     # host can be optional
                     expected.add('host')
                 assert set(body[action].keys()) == expected
+        elif action == 'lock':
+            if self.api_version < api_versions.APIVersion("2.73"):
+                assert body[action] is None
+            else:
+                # In 2.73 and above, we allow body to be one of these:
+                # a) {'lock': None}
+                # b) {'lock': {}}
+                # c) {'lock': {locked_reason': 'blah'}}
+                if body[action] is not None:
+                    expected = set()
+                    if 'locked_reason' in body[action].keys():
+                        # reason can be optional
+                        expected.add('locked_reason')
+                    assert set(body[action].keys()) == expected
+                else:
+                    assert body[action] is None
+        elif action == 'unshelve':
+            if self.api_version < api_versions.APIVersion("2.77"):
+                assert body[action] is None
+            else:
+                # In 2.77 and above, we allow body to be one of these:
+                # {'unshelve': None}
+                # {'unshelve': {'availability_zone': 'foo-az'}}
+                if body[action] is not None:
+                    assert set(body[action].keys()) == set(
+                        ['availability_zone'])
         elif action == 'rebuild':
             body = body[action]
             adminPass = body.get('adminPass', 'randompassword')
@@ -1117,7 +1140,7 @@ class FakeSessionClient(base_client.SessionClient):
     # Images
     #
     def get_images(self, **kw):
-        return (200, {}, {'images': [
+        images = [
             {
                 "id": FAKE_IMAGE_UUID_SNAPSHOT,
                 "name": "My Server Backup",
@@ -1167,7 +1190,16 @@ class FakeSessionClient(base_client.SessionClient):
                 "progress": 80,
                 "links": {},
             },
-        ]})
+        ]
+
+        if 'id' in kw:
+            requested = kw['id'].replace('in:', '').split(',')
+            images = [i for i in images if i['id'] in requested]
+        if 'names' in kw:
+            requested = kw['names'].replace('in:', '').split(',')
+            images = [i for i in images if i['name'] in requested]
+
+        return (200, {}, {'images': images})
 
     def get_images_555cae93_fb41_4145_9c52_f5b923538a26(self, **kw):
         return (200, {}, {'image': self.get_images()[2]['images'][0]})
@@ -1495,158 +1527,146 @@ class FakeSessionClient(base_client.SessionClient):
     # Tenant Usage
     #
     def get_os_simple_tenant_usage(self, **kw):
-        return (200, FAKE_RESPONSE_HEADERS,
-                {six.u('tenant_usages'): [{
-                    six.u('total_memory_mb_usage'): 25451.762807466665,
-                    six.u('total_vcpus_usage'): 49.71047423333333,
-                    six.u('total_hours'): 49.71047423333333,
-                    six.u('tenant_id'):
-                        six.u('7b0a1d73f8fb41718f3343c207597869'),
-                    six.u('stop'): six.u('2012-01-22 19:48:41.750722'),
-                    six.u('server_usages'): [{
-                        six.u('hours'): 49.71047423333333,
-                        six.u('uptime'): 27035,
-                        six.u('local_gb'): 0,
-                        six.u('ended_at'): None,
-                        six.u('name'): six.u('f15image1'),
-                        six.u('tenant_id'):
-                            six.u('7b0a1d73f8fb41718f3343c207597869'),
-                        six.u('instance_id'):
-                            six.u('f079e394-1111-457b-b350-bb5ecc685cdd'),
-                        six.u('vcpus'): 1,
-                        six.u('memory_mb'): 512,
-                        six.u('state'): six.u('active'),
-                        six.u('flavor'): six.u('m1.tiny'),
-                        six.u('started_at'):
-                            six.u('2012-01-20 18:06:06.479998')}],
-                    six.u('start'): six.u('2011-12-25 19:48:41.750687'),
-                    six.u('total_local_gb_usage'): 0.0}]})
+        return (200, FAKE_RESPONSE_HEADERS, {'tenant_usages': [{
+            'total_memory_mb_usage': 25451.762807466665,
+            'total_vcpus_usage': 49.71047423333333,
+            'total_hours': 49.71047423333333,
+            'tenant_id': '7b0a1d73f8fb41718f3343c207597869',
+            'stop': '2012-01-22 19:48:41.750722',
+            'server_usages': [{
+                'hours': 49.71047423333333,
+                'uptime': 27035,
+                'local_gb': 0,
+                'ended_at': None,
+                'name': 'f15image1',
+                'tenant_id': '7b0a1d73f8fb41718f3343c207597869',
+                'instance_id': 'f079e394-1111-457b-b350-bb5ecc685cdd',
+                'vcpus': 1,
+                'memory_mb': 512,
+                'state': 'active',
+                'flavor': 'm1.tiny',
+                'started_at': '2012-01-20 18:06:06.479998',
+            }],
+            'start': '2011-12-25 19:48:41.750687',
+            'total_local_gb_usage': 0.0}]})
 
     def get_os_simple_tenant_usage_next(self, **kw):
-        return (200, FAKE_RESPONSE_HEADERS,
-                {six.u('tenant_usages'): [{
-                    six.u('total_memory_mb_usage'): 25451.762807466665,
-                    six.u('total_vcpus_usage'): 49.71047423333333,
-                    six.u('total_hours'): 49.71047423333333,
-                    six.u('tenant_id'):
-                        six.u('7b0a1d73f8fb41718f3343c207597869'),
-                    six.u('stop'): six.u('2012-01-22 19:48:41.750722'),
-                    six.u('server_usages'): [{
-                        six.u('hours'): 49.71047423333333,
-                        six.u('uptime'): 27035,
-                        six.u('local_gb'): 0,
-                        six.u('ended_at'): None,
-                        six.u('name'): six.u('f15image1'),
-                        six.u('tenant_id'):
-                            six.u('7b0a1d73f8fb41718f3343c207597869'),
-                        six.u('instance_id'):
-                            six.u('f079e394-2222-457b-b350-bb5ecc685cdd'),
-                        six.u('vcpus'): 1,
-                        six.u('memory_mb'): 512,
-                        six.u('state'): six.u('active'),
-                        six.u('flavor'): six.u('m1.tiny'),
-                        six.u('started_at'):
-                            six.u('2012-01-20 18:06:06.479998')}],
-                    six.u('start'): six.u('2011-12-25 19:48:41.750687'),
-                    six.u('total_local_gb_usage'): 0.0}]})
+        return (200, FAKE_RESPONSE_HEADERS, {'tenant_usages': [{
+            'total_memory_mb_usage': 25451.762807466665,
+            'total_vcpus_usage': 49.71047423333333,
+            'total_hours': 49.71047423333333,
+            'tenant_id': '7b0a1d73f8fb41718f3343c207597869',
+            'stop': '2012-01-22 19:48:41.750722',
+            'server_usages': [{
+                'hours': 49.71047423333333,
+                'uptime': 27035,
+                'local_gb': 0,
+                'ended_at': None,
+                'name': 'f15image1',
+                'tenant_id': '7b0a1d73f8fb41718f3343c207597869',
+                'instance_id': 'f079e394-2222-457b-b350-bb5ecc685cdd',
+                'vcpus': 1,
+                'memory_mb': 512,
+                'state': 'active',
+                'flavor': 'm1.tiny',
+                'started_at': '2012-01-20 18:06:06.479998',
+            }],
+            'start': '2011-12-25 19:48:41.750687',
+            'total_local_gb_usage': 0.0}]})
 
     def get_os_simple_tenant_usage_next_next(self, **kw):
-        return (200, FAKE_RESPONSE_HEADERS, {six.u('tenant_usages'): []})
+        return (200, FAKE_RESPONSE_HEADERS, {'tenant_usages': []})
 
     def get_os_simple_tenant_usage_tenantfoo(self, **kw):
-        return (200, FAKE_RESPONSE_HEADERS,
-                {six.u('tenant_usage'): {
-                    six.u('total_memory_mb_usage'): 25451.762807466665,
-                    six.u('total_vcpus_usage'): 49.71047423333333,
-                    six.u('total_hours'): 49.71047423333333,
-                    six.u('tenant_id'):
-                        six.u('7b0a1d73f8fb41718f3343c207597869'),
-                    six.u('stop'): six.u('2012-01-22 19:48:41.750722'),
-                    six.u('server_usages'): [{
-                        six.u('hours'): 49.71047423333333,
-                        six.u('uptime'): 27035, six.u('local_gb'): 0,
-                        six.u('ended_at'): None,
-                        six.u('name'): six.u('f15image1'),
-                        six.u('tenant_id'):
-                            six.u('7b0a1d73f8fb41718f3343c207597869'),
-                        six.u('instance_id'):
-                            six.u('f079e394-1111-457b-b350-bb5ecc685cdd'),
-                        six.u('vcpus'): 1, six.u('memory_mb'): 512,
-                        six.u('state'): six.u('active'),
-                        six.u('flavor'): six.u('m1.tiny'),
-                        six.u('started_at'):
-                            six.u('2012-01-20 18:06:06.479998')}],
-                    six.u('start'): six.u('2011-12-25 19:48:41.750687'),
-                    six.u('total_local_gb_usage'): 0.0}})
+        return (200, FAKE_RESPONSE_HEADERS, {'tenant_usage': {
+            'total_memory_mb_usage': 25451.762807466665,
+            'total_vcpus_usage': 49.71047423333333,
+            'total_hours': 49.71047423333333,
+            'tenant_id': '7b0a1d73f8fb41718f3343c207597869',
+            'stop': '2012-01-22 19:48:41.750722',
+            'server_usages': [{
+                'hours': 49.71047423333333,
+                'uptime': 27035, 'local_gb': 0,
+                'ended_at': None,
+                'name': 'f15image1',
+                'tenant_id': '7b0a1d73f8fb41718f3343c207597869',
+                'instance_id': 'f079e394-1111-457b-b350-bb5ecc685cdd',
+                'vcpus': 1, 'memory_mb': 512,
+                'state': 'active',
+                'flavor': 'm1.tiny',
+                'started_at': '2012-01-20 18:06:06.479998',
+            }],
+            'start': '2011-12-25 19:48:41.750687',
+            'total_local_gb_usage': 0.0}})
 
     def get_os_simple_tenant_usage_test(self, **kw):
-        return (200, {}, {six.u('tenant_usage'): {
-            six.u('total_memory_mb_usage'): 25451.762807466665,
-            six.u('total_vcpus_usage'): 49.71047423333333,
-            six.u('total_hours'): 49.71047423333333,
-            six.u('tenant_id'): six.u('7b0a1d73f8fb41718f3343c207597869'),
-            six.u('stop'): six.u('2012-01-22 19:48:41.750722'),
-            six.u('server_usages'): [{
-                six.u('hours'): 49.71047423333333,
-                six.u('uptime'): 27035, six.u('local_gb'): 0,
-                six.u('ended_at'): None,
-                six.u('name'): six.u('f15image1'),
-                six.u('tenant_id'): six.u('7b0a1d73f8fb41718f3343c207597869'),
-                six.u('instance_id'):
-                    six.u('f079e394-1111-457b-b350-bb5ecc685cdd'),
-                six.u('vcpus'): 1, six.u('memory_mb'): 512,
-                six.u('state'): six.u('active'),
-                six.u('flavor'): six.u('m1.tiny'),
-                six.u('started_at'): six.u('2012-01-20 18:06:06.479998')}],
-            six.u('start'): six.u('2011-12-25 19:48:41.750687'),
-            six.u('total_local_gb_usage'): 0.0}})
+        return (200, {}, {'tenant_usage': {
+            'total_memory_mb_usage': 25451.762807466665,
+            'total_vcpus_usage': 49.71047423333333,
+            'total_hours': 49.71047423333333,
+            'tenant_id': '7b0a1d73f8fb41718f3343c207597869',
+            'stop': '2012-01-22 19:48:41.750722',
+            'server_usages': [{
+                'hours': 49.71047423333333,
+                'uptime': 27035, 'local_gb': 0,
+                'ended_at': None,
+                'name': 'f15image1',
+                'tenant_id': '7b0a1d73f8fb41718f3343c207597869',
+                'instance_id': 'f079e394-1111-457b-b350-bb5ecc685cdd',
+                'vcpus': 1, 'memory_mb': 512,
+                'state': 'active',
+                'flavor': 'm1.tiny',
+                'started_at': '2012-01-20 18:06:06.479998',
+            }],
+            'start': '2011-12-25 19:48:41.750687',
+            'total_local_gb_usage': 0.0}})
 
     def get_os_simple_tenant_usage_tenant_id(self, **kw):
-        return (200, {}, {six.u('tenant_usage'): {
-            six.u('total_memory_mb_usage'): 25451.762807466665,
-            six.u('total_vcpus_usage'): 49.71047423333333,
-            six.u('total_hours'): 49.71047423333333,
-            six.u('tenant_id'): six.u('7b0a1d73f8fb41718f3343c207597869'),
-            six.u('stop'): six.u('2012-01-22 19:48:41.750722'),
-            six.u('server_usages'): [{
-                six.u('hours'): 49.71047423333333,
-                six.u('uptime'): 27035, six.u('local_gb'): 0,
-                six.u('ended_at'): None,
-                six.u('name'): six.u('f15image1'),
-                six.u('tenant_id'): six.u('7b0a1d73f8fb41718f3343c207597869'),
-                six.u('instance_id'):
-                    six.u('f079e394-1111-457b-b350-bb5ecc685cdd'),
-                six.u('vcpus'): 1, six.u('memory_mb'): 512,
-                six.u('state'): six.u('active'),
-                six.u('flavor'): six.u('m1.tiny'),
-                six.u('started_at'): six.u('2012-01-20 18:06:06.479998')}],
-            six.u('start'): six.u('2011-12-25 19:48:41.750687'),
-            six.u('total_local_gb_usage'): 0.0}})
+        return (200, {}, {'tenant_usage': {
+            'total_memory_mb_usage': 25451.762807466665,
+            'total_vcpus_usage': 49.71047423333333,
+            'total_hours': 49.71047423333333,
+            'tenant_id': '7b0a1d73f8fb41718f3343c207597869',
+            'stop': '2012-01-22 19:48:41.750722',
+            'server_usages': [{
+                'hours': 49.71047423333333,
+                'uptime': 27035, 'local_gb': 0,
+                'ended_at': None,
+                'name': 'f15image1',
+                'tenant_id': '7b0a1d73f8fb41718f3343c207597869',
+                'instance_id': 'f079e394-1111-457b-b350-bb5ecc685cdd',
+                'vcpus': 1, 'memory_mb': 512,
+                'state': 'active',
+                'flavor': 'm1.tiny',
+                'started_at': '2012-01-20 18:06:06.479998',
+            }],
+            'start': '2011-12-25 19:48:41.750687',
+            'total_local_gb_usage': 0.0}})
 
     def get_os_simple_tenant_usage_tenant_id_next(self, **kw):
-        return (200, {}, {six.u('tenant_usage'): {
-            six.u('total_memory_mb_usage'): 25451.762807466665,
-            six.u('total_vcpus_usage'): 49.71047423333333,
-            six.u('total_hours'): 49.71047423333333,
-            six.u('tenant_id'): six.u('7b0a1d73f8fb41718f3343c207597869'),
-            six.u('stop'): six.u('2012-01-22 19:48:41.750722'),
-            six.u('server_usages'): [{
-                six.u('hours'): 49.71047423333333,
-                six.u('uptime'): 27035, six.u('local_gb'): 0,
-                six.u('ended_at'): None,
-                six.u('name'): six.u('f15image1'),
-                six.u('tenant_id'): six.u('7b0a1d73f8fb41718f3343c207597869'),
-                six.u('instance_id'):
-                    six.u('f079e394-2222-457b-b350-bb5ecc685cdd'),
-                six.u('vcpus'): 1, six.u('memory_mb'): 512,
-                six.u('state'): six.u('active'),
-                six.u('flavor'): six.u('m1.tiny'),
-                six.u('started_at'): six.u('2012-01-20 18:06:06.479998')}],
-            six.u('start'): six.u('2011-12-25 19:48:41.750687'),
-            six.u('total_local_gb_usage'): 0.0}})
+        return (200, {}, {'tenant_usage': {
+            'total_memory_mb_usage': 25451.762807466665,
+            'total_vcpus_usage': 49.71047423333333,
+            'total_hours': 49.71047423333333,
+            'tenant_id': '7b0a1d73f8fb41718f3343c207597869',
+            'stop': '2012-01-22 19:48:41.750722',
+            'server_usages': [{
+                'hours': 49.71047423333333,
+                'uptime': 27035, 'local_gb': 0,
+                'ended_at': None,
+                'name': 'f15image1',
+                'tenant_id': '7b0a1d73f8fb41718f3343c207597869',
+                'instance_id': 'f079e394-2222-457b-b350-bb5ecc685cdd',
+                'vcpus': 1, 'memory_mb': 512,
+                'state': 'active',
+                'flavor': 'm1.tiny',
+                'started_at': '2012-01-20 18:06:06.479998',
+            }],
+            'start': '2011-12-25 19:48:41.750687',
+            'total_local_gb_usage': 0.0}})
 
     def get_os_simple_tenant_usage_tenant_id_next_next(self, **kw):
-        return (200, {}, {six.u('tenant_usage'): {}})
+        return (200, {}, {'tenant_usage': {}})
 
     #
     # Aggregates
@@ -1699,6 +1719,9 @@ class FakeSessionClient(base_client.SessionClient):
         return self._return_aggregate_3()
 
     def delete_os_aggregates_1(self, **kw):
+        return (202, {}, None)
+
+    def post_os_aggregates_1_images(self, body, **kw):
         return (202, {}, None)
 
     #
@@ -2044,6 +2067,11 @@ class FakeSessionClient(base_client.SessionClient):
         if self.api_version >= api_versions.APIVersion('2.70'):
             # Include the "tag" field in the response.
             attachment['tag'] = 'test-tag'
+
+        if self.api_version >= api_versions.APIVersion('2.79'):
+            # Include the "delete_on_termination" field in the
+            # response.
+            attachment['delete_on_termination'] = True
         return (200, FAKE_RESPONSE_HEADERS, {"volumeAttachment": attachment})
 
     def put_servers_1234_os_volume_attachments_Work(self, **kw):
@@ -2068,6 +2096,12 @@ class FakeSessionClient(base_client.SessionClient):
             # Include the "tag" field in each attachment.
             for attachment in attachments['volumeAttachments']:
                 attachment['tag'] = 'test-tag'
+
+        if self.api_version >= api_versions.APIVersion('2.79'):
+            # Include the "delete_on_termination" field in each
+            # attachment.
+            for attachment in attachments['volumeAttachments']:
+                attachment['delete_on_termination'] = True
         return (200, FAKE_RESPONSE_HEADERS, attachments)
 
     def get_servers_1234_os_volume_attachments_Work(self, **kw):
@@ -2214,34 +2248,6 @@ class FakeSessionClient(base_client.SessionClient):
     def post_servers_uuid6_action(self, **kw):
         return 202, {}, {}
 
-    def get_os_cells_child_cell(self, **kw):
-        cell = {'cell': {
-            'username': 'cell1_user',
-            'name': 'cell1',
-            'rpc_host': '10.0.1.10',
-            'info': {
-                'username': 'cell1_user',
-                'rpc_host': '10.0.1.10',
-                'type': 'child',
-                'name': 'cell1',
-                'rpc_port': 5673},
-            'type': 'child',
-            'rpc_port': 5673,
-            'loaded': True
-        }}
-        return (200, FAKE_RESPONSE_HEADERS, cell)
-
-    def get_os_cells_capacities(self, **kw):
-        cell_capacities_response = {"cell": {"capacities": {"ram_free": {
-            "units_by_mb": {"8192": 0, "512": 13, "4096": 1, "2048": 3,
-                            "16384": 0}, "total_mb": 7680}, "disk_free": {
-            "units_by_mb": {"81920": 11, "20480": 46, "40960": 23, "163840": 5,
-                            "0": 0}, "total_mb": 1052672}}}}
-        return (200, FAKE_RESPONSE_HEADERS, cell_capacities_response)
-
-    def get_os_cells_child_cell_capacities(self, **kw):
-        return self.get_os_cells_capacities()
-
     def get_os_migrations(self, **kw):
         migration1 = {
             "created_at": "2012-10-29T13:42:02.000000",
@@ -2280,6 +2286,14 @@ class FakeSessionClient(base_client.SessionClient):
         if self.api_version >= api_versions.APIVersion("2.59"):
             migration1.update({"uuid": "11111111-07d5-11e1-90e3-e3dffe0c5983"})
             migration2.update({"uuid": "22222222-07d5-11e1-90e3-e3dffe0c5983"})
+
+        if self.api_version >= api_versions.APIVersion("2.80"):
+            migration1.update({
+                "project_id": "b59c18e5fa284fd384987c5cb25a1853",
+                "user_id": "13cc0930d27c4be0acc14d7c47a3e1f7"})
+            migration2.update({
+                "project_id": "b59c18e5fa284fd384987c5cb25a1853",
+                "user_id": "13cc0930d27c4be0acc14d7c47a3e1f7"})
 
         migration_list = []
         instance_uuid = kw.get('instance_uuid', None)
@@ -2372,6 +2386,12 @@ class FakeSessionClient(base_client.SessionClient):
             "disk_remaining_bytes": 230000,
             "updated_at": "2016-01-29T13:42:02.000000"
         }}
+
+        if self.api_version >= api_versions.APIVersion("2.80"):
+            migration['migration'].update({
+                "project_id": "b59c18e5fa284fd384987c5cb25a1853",
+                "user_id": "13cc0930d27c4be0acc14d7c47a3e1f7"})
+
         return (200, FAKE_RESPONSE_HEADERS, migration)
 
     @api_versions.wraps(start_version="2.23")
@@ -2395,6 +2415,12 @@ class FakeSessionClient(base_client.SessionClient):
                 "disk_remaining_bytes": 230000,
                 "updated_at": "2016-01-29T13:42:02.000000"
             }]}
+
+        if self.api_version >= api_versions.APIVersion("2.80"):
+            migrations['migrations'][0].update({
+                "project_id": "b59c18e5fa284fd384987c5cb25a1853",
+                "user_id": "13cc0930d27c4be0acc14d7c47a3e1f7"})
+
         return (200, FAKE_RESPONSE_HEADERS, migrations)
 
     def delete_servers_1234_migrations_1(self):

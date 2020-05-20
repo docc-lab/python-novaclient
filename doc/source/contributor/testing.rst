@@ -8,17 +8,11 @@ test targets that can be run to validate the code.
 ``tox -e pep8``
   Style guidelines enforcement.
 
-``tox -e py27``
-  Traditional unit testing (Python 2.7).
-
-``tox -e py35``
-  Traditional unit testing (Python 3.5).
+``tox -e py38``
+  Traditional unit testing (Python 3.8).
 
 ``tox -e functional``
-  Live functional testing against an existing OpenStack instance. (Python 2.7)
-
-``tox -e functional-py35``
-  Live functional testing against an existing OpenStack instance. (Python 3.5)
+  Live functional testing against an existing OpenStack instance. (Python 3.8)
 
 ``tox -e cover``
   Generate a coverage report on unit testing.
@@ -31,4 +25,4 @@ DevStack installation with a demo and an admin user/tenant - or clouds named
 
 Refer to  `Consistent Testing Interface`__ for more details.
 
-__ https://git.openstack.org/cgit/openstack/governance/tree/reference/project-testing-interface.rst
+__ https://opendev.org/openstack/governance/src/branch/master/reference/project-testing-interface.rst

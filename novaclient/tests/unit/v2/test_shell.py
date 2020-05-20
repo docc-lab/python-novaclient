@@ -18,15 +18,15 @@
 
 import argparse
 import base64
+import builtins
 import collections
 import datetime
+import io
 import os
+from unittest import mock
 
 import fixtures
-import mock
 from oslo_utils import timeutils
-import six
-from six.moves import builtins
 import testtools
 
 import novaclient
@@ -88,8 +88,8 @@ class ShellTest(utils.TestCase):
     # TODO(stephenfin): We should migrate most of the existing assertRaises
     # calls to simply pass expected_error to this instead so we can easily
     # capture and compare output
-    @mock.patch('sys.stdout', new_callable=six.StringIO)
-    @mock.patch('sys.stderr', new_callable=six.StringIO)
+    @mock.patch('sys.stdout', new_callable=io.StringIO)
+    @mock.patch('sys.stderr', new_callable=io.StringIO)
     def run_command(self, cmd, mock_stderr, mock_stdout, api_version=None,
                     expected_error=None):
         version_options = []
@@ -250,22 +250,6 @@ class ShellTest(utils.TestCase):
             }},
         )
 
-    def test_boot_config_drive(self):
-        self.run_command(
-            'boot --flavor 1 --image %s --config-drive 1 some-server' %
-            FAKE_UUID_1)
-        self.assert_called_anytime(
-            'POST', '/servers',
-            {'server': {
-                'flavorRef': '1',
-                'name': 'some-server',
-                'imageRef': FAKE_UUID_1,
-                'min_count': 1,
-                'max_count': 1,
-                'config_drive': True
-            }},
-        )
-
     def test_boot_access_ip(self):
         self.run_command(
             'boot --flavor 1 --image %s --access-ip-v4 10.10.10.10 '
@@ -283,9 +267,9 @@ class ShellTest(utils.TestCase):
             }},
         )
 
-    def test_boot_config_drive_custom(self):
+    def test_boot_config_drive(self):
         self.run_command(
-            'boot --flavor 1 --image %s --config-drive /dev/hda some-server' %
+            'boot --flavor 1 --image %s --config-drive 1 some-server' %
             FAKE_UUID_1)
         self.assert_called_anytime(
             'POST', '/servers',
@@ -295,9 +279,32 @@ class ShellTest(utils.TestCase):
                 'imageRef': FAKE_UUID_1,
                 'min_count': 1,
                 'max_count': 1,
-                'config_drive': '/dev/hda'
+                'config_drive': True
             }},
         )
+
+    def test_boot_config_drive_false(self):
+        self.run_command(
+            'boot --flavor 1 --image %s --config-drive false some-server' %
+            FAKE_UUID_1)
+        self.assert_called_anytime(
+            'POST', '/servers',
+            {'server': {
+                'flavorRef': '1',
+                'name': 'some-server',
+                'imageRef': FAKE_UUID_1,
+                'min_count': 1,
+                'max_count': 1,
+            }},
+        )
+
+    def test_boot_config_drive_invalid_value(self):
+        ex = self.assertRaises(
+            exceptions.CommandError, self.run_command,
+            'boot --flavor 1 --image %s --config-drive /dev/hda some-server' %
+            FAKE_UUID_1)
+        self.assertIn("The value of the '--config-drive' option must be "
+                      "a boolean value.", str(ex))
 
     def test_boot_invalid_user_data(self):
         invalid_file = os.path.join(os.path.dirname(__file__),
@@ -669,7 +676,7 @@ class ShellTest(utils.TestCase):
             'size=1,bootindex=0,shutdown=remove,tag=foo,volume_type=lvm '
             'bfv-server' % FAKE_UUID_1, api_version='2.66')
         self.assertIn("'volume_type' in block device mapping is not supported "
-                      "in API version", six.text_type(ex))
+                      "in API version", str(ex))
 
     def test_boot_from_volume_with_volume_type(self):
         """Tests creating a volume-backed server from a source image and
@@ -888,7 +895,7 @@ class ShellTest(utils.TestCase):
                '--nic net-id=1,port-id=2 some-server' % FAKE_UUID_1)
         ex = self.assertRaises(exceptions.CommandError, self.run_command,
                                cmd, api_version='2.1')
-        self.assertNotIn('tag=tag', six.text_type(ex))
+        self.assertNotIn('tag=tag', str(ex))
 
     def test_boot_invalid_nics_v2_32(self):
         # This is a negative test to make sure we fail with the correct message
@@ -896,7 +903,7 @@ class ShellTest(utils.TestCase):
                '--nic net-id=1,port-id=2 some-server' % FAKE_UUID_1)
         ex = self.assertRaises(exceptions.CommandError, self.run_command,
                                cmd, api_version='2.32')
-        self.assertIn('tag=tag', six.text_type(ex))
+        self.assertIn('tag=tag', str(ex))
 
     def test_boot_invalid_nics_v2_36_auto(self):
         """This is a negative test to make sure we fail with the correct
@@ -905,7 +912,7 @@ class ShellTest(utils.TestCase):
         cmd = ('boot --image %s --flavor 1 --nic auto test' % FAKE_UUID_1)
         ex = self.assertRaises(exceptions.CommandError, self.run_command,
                                cmd, api_version='2.36')
-        self.assertNotIn('auto,none', six.text_type(ex))
+        self.assertNotIn('auto,none', str(ex))
 
     def test_boot_invalid_nics_v2_37(self):
         """This is a negative test to make sure we fail with the correct
@@ -915,7 +922,7 @@ class ShellTest(utils.TestCase):
                '--nic net-id=1 --nic auto some-server' % FAKE_UUID_1)
         ex = self.assertRaises(exceptions.CommandError, self.run_command,
                                cmd, api_version='2.37')
-        self.assertIn('auto,none', six.text_type(ex))
+        self.assertIn('auto,none', str(ex))
 
     def test_boot_nics_auto_allocate_default(self):
         """Tests that if microversion>=2.37 is specified and no --nics are
@@ -1055,7 +1062,7 @@ class ShellTest(utils.TestCase):
         cmd = ('boot --image %s --flavor 1 '
                '--nic net-name=blank some-server' % FAKE_UUID_1)
         # this should raise a multiple matches error
-        msg = 'No Network matching blank\..*'
+        msg = 'No Network matching blank\\..*'
         with testtools.ExpectedException(exceptions.CommandError, msg):
             self.run_command(cmd)
 
@@ -1400,7 +1407,84 @@ class ShellTest(utils.TestCase):
             exceptions.CommandError, self.run_command,
             'boot --flavor 1 --image %s some-server' % FAKE_UUID_2)
         self.assertIn('Instance %s could not be found.' % FAKE_UUID_1,
-                      six.text_type(ex))
+                      str(ex))
+
+    def test_boot_with_host_v274(self):
+        self.run_command('boot --flavor 1 --image %s '
+                         '--host new-host --nic auto '
+                         'some-server' % FAKE_UUID_1,
+                         api_version='2.74')
+        self.assert_called_anytime(
+            'POST', '/servers',
+            {'server': {
+                'flavorRef': '1',
+                'name': 'some-server',
+                'imageRef': FAKE_UUID_1,
+                'min_count': 1,
+                'max_count': 1,
+                'networks': 'auto',
+                'host': 'new-host',
+            }},
+        )
+
+    def test_boot_with_hypervisor_hostname_v274(self):
+        self.run_command('boot --flavor 1 --image %s --nic auto '
+                         '--hypervisor-hostname new-host '
+                         'some-server' % FAKE_UUID_1,
+                         api_version='2.74')
+        self.assert_called_anytime(
+            'POST', '/servers',
+            {'server': {
+                'flavorRef': '1',
+                'name': 'some-server',
+                'imageRef': FAKE_UUID_1,
+                'min_count': 1,
+                'max_count': 1,
+                'networks': 'auto',
+                'hypervisor_hostname': 'new-host',
+            }},
+        )
+
+    def test_boot_with_host_and_hypervisor_hostname_v274(self):
+        self.run_command('boot --flavor 1 --image %s '
+                         '--host new-host --nic auto '
+                         '--hypervisor-hostname new-host '
+                         'some-server' % FAKE_UUID_1,
+                         api_version='2.74')
+        self.assert_called_anytime(
+            'POST', '/servers',
+            {'server': {
+                'flavorRef': '1',
+                'name': 'some-server',
+                'imageRef': FAKE_UUID_1,
+                'min_count': 1,
+                'max_count': 1,
+                'networks': 'auto',
+                'host': 'new-host',
+                'hypervisor_hostname': 'new-host',
+            }},
+        )
+
+    def test_boot_with_host_pre_v274(self):
+        cmd = ('boot --flavor 1 --image %s --nic auto '
+               '--host new-host some-server'
+               % FAKE_UUID_1)
+        self.assertRaises(SystemExit, self.run_command,
+                          cmd, api_version='2.73')
+
+    def test_boot_with_hypervisor_hostname_pre_v274(self):
+        cmd = ('boot --flavor 1 --image %s --nic auto '
+               '--hypervisor-hostname new-host some-server'
+               % FAKE_UUID_1)
+        self.assertRaises(SystemExit, self.run_command,
+                          cmd, api_version='2.73')
+
+    def test_boot_with_host_and_hypervisor_hostname_pre_v274(self):
+        cmd = ('boot --flavor 1 --image %s --nic auto '
+               '--host new-host --hypervisor-hostname new-host some-server'
+               % FAKE_UUID_1)
+        self.assertRaises(SystemExit, self.run_command,
+                          cmd, api_version='2.73')
 
     def test_flavor_list(self):
         out, _ = self.run_command('flavor-list')
@@ -1620,7 +1704,7 @@ class ShellTest(utils.TestCase):
         self.run_command('list --user fake_user')
         self.assert_called(
             'GET',
-            '/servers/detail?all_tenants=1&user_id=fake_user')
+            '/servers/detail?user_id=fake_user')
 
     def test_list_with_single_sort_key_no_dir(self):
         self.run_command('list --sort 1')
@@ -1747,12 +1831,56 @@ class ShellTest(utils.TestCase):
         ex = self.assertRaises(exceptions.CommandError, self.run_command,
                                'list --changes-before 0123456789',
                                api_version='2.66')
-        self.assertIn('Invalid changes-before value', six.text_type(ex))
+        self.assertIn('Invalid changes-before value', str(ex))
 
     def test_list_with_changes_before_pre_v266_not_allowed(self):
         self.assertRaises(SystemExit, self.run_command,
                           'list --changes-before 2016-02-29T06:23:22',
                           api_version='2.65')
+
+    def test_list_with_availability_zone(self):
+        self.run_command('list --availability-zone nova')
+        self.assert_called('GET', '/servers/detail?availability_zone=nova')
+
+    def test_list_with_key_name(self):
+        self.run_command('list --key-name my_key')
+        self.assert_called('GET', '/servers/detail?key_name=my_key')
+
+    def test_list_with_config_drive(self):
+        self.run_command('list --config-drive')
+        self.assert_called('GET', '/servers/detail?config_drive=True')
+
+    def test_list_with_no_config_drive(self):
+        self.run_command('list --no-config-drive')
+        self.assert_called('GET', '/servers/detail?config_drive=False')
+
+    def test_list_with_conflicting_config_drive(self):
+        self.assertRaises(SystemExit, self.run_command,
+                          'list --config-drive --no-config-drive')
+
+    def test_list_with_progress(self):
+        self.run_command('list --progress 100')
+        self.assert_called('GET', '/servers/detail?progress=100')
+
+    def test_list_with_0_progress(self):
+        self.run_command('list --progress 0')
+        self.assert_called('GET', '/servers/detail?progress=0')
+
+    def test_list_with_vm_state(self):
+        self.run_command('list --vm-state active')
+        self.assert_called('GET', '/servers/detail?vm_state=active')
+
+    def test_list_with_task_state(self):
+        self.run_command('list --task-state reboot_started')
+        self.assert_called('GET', '/servers/detail?task_state=reboot_started')
+
+    def test_list_with_power_state(self):
+        self.run_command('list --power-state 1')
+        self.assert_called('GET', '/servers/detail?power_state=1')
+
+    def test_list_with_power_state_filter_for_0_state(self):
+        self.run_command('list --power-state 0')
+        self.assert_called('GET', '/servers/detail?power_state=0')
 
     def test_list_fields_redundant(self):
         output, _err = self.run_command('list --fields id,status,status')
@@ -1863,7 +1991,7 @@ class ShellTest(utils.TestCase):
             'rebuild sample-server %s --key-unset --key-name test_keypair' %
             FAKE_UUID_1, api_version='2.54')
         self.assertIn("Cannot specify '--key-unset' with '--key-name'.",
-                      six.text_type(ex))
+                      str(ex))
 
     def test_rebuild_with_incorrect_metadata(self):
         cmd = 'rebuild sample-server %s --name asdf --meta foo' % FAKE_UUID_1
@@ -1917,7 +2045,7 @@ class ShellTest(utils.TestCase):
                                api_version='2.57')
         self.assertIn("Can't open '%(user_data)s': "
                       "[Errno 2] No such file or directory: '%(user_data)s'" %
-                      {'user_data': invalid_file}, six.text_type(ex))
+                      {'user_data': invalid_file}, str(ex))
 
     def test_rebuild_unset_user_data(self):
         self.run_command('rebuild sample-server %s --user-data-unset' %
@@ -1940,7 +2068,7 @@ class ShellTest(utils.TestCase):
         ex = self.assertRaises(exceptions.CommandError, self.run_command, cmd,
                                api_version='2.57')
         self.assertIn("Cannot specify '--user-data-unset' with "
-                      "'--user-data'.", six.text_type(ex))
+                      "'--user-data'.", str(ex))
 
     def test_rebuild_with_single_trusted_image_certificates(self):
         self.run_command('rebuild sample-server %s '
@@ -2048,7 +2176,7 @@ class ShellTest(utils.TestCase):
             api_version='2.63')
         self.assertIn("Cannot specify '--trusted-image-certificates-unset' "
                       "with '--trusted-image-certificate-id'",
-                      six.text_type(ex))
+                      str(ex))
 
     def test_rebuild_with_trusted_image_certificates_unset_env_conflict(self):
         """Tests the error condition that trusted image certs are both unset
@@ -2062,7 +2190,7 @@ class ShellTest(utils.TestCase):
             FAKE_UUID_1, api_version='2.63')
         self.assertIn("Cannot specify '--trusted-image-certificates-unset' "
                       "with '--trusted-image-certificate-id'",
-                      six.text_type(ex))
+                      str(ex))
 
     def test_rebuild_with_trusted_image_certificates_arg_and_envar(self):
         """Tests that if both the environment variable and argument are
@@ -2148,6 +2276,24 @@ class ShellTest(utils.TestCase):
         self.run_command('lock sample-server')
         self.assert_called('POST', '/servers/1234/action', {'lock': None})
 
+    def test_lock_pre_v273(self):
+        exp = self.assertRaises(SystemExit,
+                                self.run_command,
+                                'lock sample-server --reason zombies',
+                                api_version='2.72')
+        self.assertIn('2', str(exp))
+
+    def test_lock_v273(self):
+        self.run_command('lock sample-server',
+                         api_version='2.73')
+        self.assert_called('POST', '/servers/1234/action',
+                           {'lock': None})
+
+        self.run_command('lock sample-server --reason zombies',
+                         api_version='2.73')
+        self.assert_called('POST', '/servers/1234/action',
+                           {'lock': {'locked_reason': 'zombies'}})
+
     def test_unlock(self):
         self.run_command('unlock sample-server')
         self.assert_called('POST', '/servers/1234/action', {'unlock': None})
@@ -2190,6 +2336,27 @@ class ShellTest(utils.TestCase):
     def test_unshelve(self):
         self.run_command('unshelve sample-server')
         self.assert_called('POST', '/servers/1234/action', {'unshelve': None})
+
+    def test_unshelve_pre_v277_with_az_fails(self):
+        """Tests that trying to unshelve with an --availability-zone before
+        2.77 is an error.
+        """
+        self.assertRaises(SystemExit,
+                          self.run_command,
+                          'unshelve --availability-zone foo-az sample-server',
+                          api_version='2.76')
+
+    def test_unshelve_v277(self):
+        # Test backward compat without an AZ specified.
+        self.run_command('unshelve sample-server',
+                         api_version='2.77')
+        self.assert_called('POST', '/servers/1234/action',
+                           {'unshelve': None})
+        # Test with specifying an AZ.
+        self.run_command('unshelve --availability-zone foo-az sample-server',
+                         api_version='2.77')
+        self.assert_called('POST', '/servers/1234/action',
+                           {'unshelve': {'availability_zone': 'foo-az'}})
 
     def test_migrate(self):
         self.run_command('migrate sample-server')
@@ -2374,6 +2541,19 @@ class ShellTest(utils.TestCase):
         self.assert_called('GET', '/servers/1234/diagnostics')
         self.run_command('diagnostics sample-server')
         self.assert_called('GET', '/servers/1234/diagnostics')
+
+    def test_server_topology(self):
+        self.run_command('server-topology 1234', api_version='2.78')
+        self.assert_called('GET', '/servers/1234/topology')
+        self.run_command('server-topology sample-server', api_version='2.78')
+        self.assert_called('GET', '/servers/1234/topology')
+
+    def test_server_topology_pre278(self):
+        exp = self.assertRaises(SystemExit,
+                                self.run_command,
+                                'server-topology 1234',
+                                api_version='2.77')
+        self.assertIn('2', str(exp))
 
     def test_refresh_network(self):
         self.run_command('refresh-network 1234')
@@ -2651,7 +2831,7 @@ class ShellTest(utils.TestCase):
                                'aggregate-update test')
         self.assertIn("Either '--name <name>' or '--availability-zone "
                       "<availability-zone>' must be specified.",
-                      six.text_type(ex))
+                      str(ex))
 
     def test_aggregate_set_metadata_add_by_id(self):
         out, err = self.run_command('aggregate-set-metadata 3 foo=bar')
@@ -2748,6 +2928,30 @@ class ShellTest(utils.TestCase):
         self.run_command('aggregate-show test')
         self.assert_called('GET', '/os-aggregates')
 
+    def test_aggregate_cache_images(self):
+        self.run_command(
+            'aggregate-cache-images 1 %s %s' % (
+                FAKE_UUID_1, FAKE_UUID_2),
+            api_version='2.81')
+        body = {
+            'cache': [{'id': FAKE_UUID_1},
+                      {'id': FAKE_UUID_2}],
+        }
+        self.assert_called('POST', '/os-aggregates/1/images', body)
+
+    def test_aggregate_cache_images_no_images(self):
+        self.assertRaises(SystemExit,
+                          self.run_command,
+                          'aggregate-cache-images 1',
+                          api_version='2.81')
+
+    def test_aggregate_cache_images_pre281(self):
+        self.assertRaises(SystemExit,
+                          self.run_command,
+                          'aggregate-cache-images 1 %s %s' % (
+                              FAKE_UUID_1, FAKE_UUID_2),
+                          api_version='2.80')
+
     def test_live_migration(self):
         self.run_command('live-migration sample-server hostname')
         self.assert_called('POST', '/servers/1234/action',
@@ -2819,10 +3023,38 @@ class ShellTest(utils.TestCase):
                          api_version='2.23')
         self.assert_called('GET', '/servers/1234/migrations')
 
+    def test_list_migrations_pre_v280(self):
+        out = self.run_command('server-migration-list sample-server',
+                               api_version='2.79')[0]
+        self.assert_called('GET', '/servers/1234/migrations')
+        self.assertNotIn('User ID', out)
+        self.assertNotIn('Project ID', out)
+
+    def test_list_migrations_v280(self):
+        out = self.run_command('server-migration-list sample-server',
+                               api_version='2.80')[0]
+        self.assert_called('GET', '/servers/1234/migrations')
+        self.assertIn('User ID', out)
+        self.assertIn('Project ID', out)
+
     def test_get_migration(self):
         self.run_command('server-migration-show sample-server 1',
                          api_version='2.23')
         self.assert_called('GET', '/servers/1234/migrations/1')
+
+    def test_get_migration_pre_v280(self):
+        out = self.run_command('server-migration-show sample-server 1',
+                               api_version='2.79')[0]
+        self.assert_called('GET', '/servers/1234/migrations/1')
+        self.assertNotIn('user_id', out)
+        self.assertNotIn('project_id', out)
+
+    def test_get_migration_v280(self):
+        out = self.run_command('server-migration-show sample-server 1',
+                               api_version='2.80')[0]
+        self.assert_called('GET', '/servers/1234/migrations/1')
+        self.assertIn('user_id', out)
+        self.assertIn('project_id', out)
 
     def test_live_migration_abort(self):
         self.run_command('live-migration-abort sample-server 1',
@@ -3724,10 +3956,90 @@ class ShellTest(utils.TestCase):
                                 'tag': 'test-tag'}})
         self.assertIn('test-tag', out)
 
-    def test_volume_update(self):
-        self.run_command('volume-update sample-server Work Work')
+    def test_volume_attachments_pre_v2_79(self):
+        out = self.run_command(
+            'volume-attachments 1234', api_version='2.78')[0]
+        self.assert_called('GET', '/servers/1234/os-volume_attachments')
+        self.assertNotIn('DELETE ON TERMINATION', out)
+
+    def test_volume_attachments_v2_79(self):
+        out = self.run_command(
+            'volume-attachments 1234', api_version='2.79')[0]
+        self.assert_called('GET', '/servers/1234/os-volume_attachments')
+        self.assertIn('DELETE ON TERMINATION', out)
+
+    def test_volume_attach_with_delete_on_termination_pre_v2_79(self):
+        self.assertRaises(
+            SystemExit, self.run_command,
+            'volume-attach --delete-on-termination sample-server '
+            'Work /dev/vdb', api_version='2.78')
+
+    def test_volume_attach_with_delete_on_termination_v2_79(self):
+        out = self.run_command(
+            'volume-attach --delete-on-termination sample-server '
+            '2 /dev/vdb', api_version='2.79')[0]
+        self.assert_called('POST', '/servers/1234/os-volume_attachments',
+                           {'volumeAttachment':
+                               {'device': '/dev/vdb',
+                                'volumeId': '2',
+                                'delete_on_termination': True}})
+        self.assertIn('delete_on_termination', out)
+
+    def test_volume_attach_without_delete_on_termination(self):
+        self.run_command('volume-attach sample-server Work',
+                         api_version='2.79')
+        self.assert_called('POST', '/servers/1234/os-volume_attachments',
+                           {'volumeAttachment':
+                               {'volumeId': 'Work'}})
+
+    def test_volume_update_pre_v285(self):
+        """Before microversion 2.85, we should keep the original behavior"""
+        self.run_command('volume-update sample-server Work Work',
+                         api_version='2.84')
         self.assert_called('PUT', '/servers/1234/os-volume_attachments/Work',
                            {'volumeAttachment': {'volumeId': 'Work'}})
+
+    def test_volume_update_swap_v285(self):
+        """Microversion 2.85, we should also keep the original behavior."""
+        self.run_command('volume-update sample-server Work Work',
+                         api_version='2.85')
+        self.assert_called('PUT', '/servers/1234/os-volume_attachments/Work',
+                           {'volumeAttachment': {'volumeId': 'Work'}})
+
+    def test_volume_update_delete_on_termination_pre_v285(self):
+        self.assertRaises(
+            SystemExit, self.run_command,
+            'volume-update sample-server --delete-on-termination Work Work',
+            api_version='2.84')
+
+    def test_volume_update_no_delete_on_termination_pre_v285(self):
+        self.assertRaises(
+            SystemExit, self.run_command,
+            'volume-update sample-server --no-delete-on-termination Work Work',
+            api_version='2.84')
+
+    def test_volume_update_v285(self):
+        self.run_command('volume-update sample-server --delete-on-termination '
+                         'Work Work', api_version='2.85')
+        body = {'volumeAttachment':
+                {'volumeId': 'Work', 'delete_on_termination': True}}
+        self.assert_called('PUT', '/servers/1234/os-volume_attachments/Work',
+                           body)
+
+        self.run_command('volume-update sample-server '
+                         '--no-delete-on-termination '
+                         'Work Work', api_version='2.85')
+        body = {'volumeAttachment':
+                {'volumeId': 'Work', 'delete_on_termination': False}}
+        self.assert_called('PUT', '/servers/1234/os-volume_attachments/Work',
+                           body)
+
+    def test_volume_update_v285_conflicting(self):
+        self.assertRaises(
+            SystemExit, self.run_command,
+            'volume-update sample-server --delete-on-termination '
+            '--no-delete-on-termination Work Work',
+            api_version='2.85')
 
     def test_volume_detach(self):
         self.run_command('volume-detach sample-server Work')
@@ -3785,7 +4097,7 @@ class ShellTest(utils.TestCase):
             exceptions.CommandError, self.run_command,
             'instance-action-list sample-server --changes-since 0123456789',
             api_version='2.58')
-        self.assertIn('Invalid changes-since value', six.text_type(ex))
+        self.assertIn('Invalid changes-since value', str(ex))
 
     def test_instance_action_list_changes_before_pre_v266_not_allowed(self):
         cmd = 'instance-action-list sample-server --changes-before ' \
@@ -3807,7 +4119,7 @@ class ShellTest(utils.TestCase):
             exceptions.CommandError, self.run_command,
             'instance-action-list sample-server --changes-before 0123456789',
             api_version='2.66')
-        self.assertIn('Invalid changes-before value', six.text_type(ex))
+        self.assertIn('Invalid changes-before value', str(ex))
 
     def test_instance_usage_audit_log(self):
         self.run_command('instance-usage-audit-log')
@@ -3819,18 +4131,6 @@ class ShellTest(utils.TestCase):
              "2016-12-10 13:59:59.999999"])
         self.assert_called('GET', '/os-instance_usage_audit_log'
                                   '/2016-12-10%2013%3A59%3A59.999999')
-
-    def test_cell_show(self):
-        self.run_command('cell-show child_cell')
-        self.assert_called('GET', '/os-cells/child_cell')
-
-    def test_cell_capacities_with_cell_name(self):
-        self.run_command('cell-capacities --cell child_cell')
-        self.assert_called('GET', '/os-cells/child_cell/capacities')
-
-    def test_cell_capacities_without_cell_name(self):
-        self.run_command('cell-capacities')
-        self.assert_called('GET', '/os-cells/capacities')
 
     def test_migration_list(self):
         self.run_command('migration-list')
@@ -3884,7 +4184,7 @@ class ShellTest(utils.TestCase):
         ex = self.assertRaises(exceptions.CommandError, self.run_command,
                                'migration-list --changes-since 0123456789',
                                api_version='2.59')
-        self.assertIn('Invalid changes-since value', six.text_type(ex))
+        self.assertIn('Invalid changes-since value', str(ex))
 
     def test_migration_list_with_changes_before_v266(self):
         self.run_command('migration-list --changes-before 2016-02-29T06:23:22',
@@ -3896,12 +4196,58 @@ class ShellTest(utils.TestCase):
         ex = self.assertRaises(exceptions.CommandError, self.run_command,
                                'migration-list --changes-before 0123456789',
                                api_version='2.66')
-        self.assertIn('Invalid changes-before value', six.text_type(ex))
+        self.assertIn('Invalid changes-before value', str(ex))
 
     def test_migration_list_with_changes_before_pre_v266_not_allowed(self):
         cmd = 'migration-list --changes-before 2016-02-29T06:23:22'
         self.assertRaises(SystemExit, self.run_command, cmd,
                           api_version='2.65')
+
+    def test_migration_list_with_user_id_v280(self):
+        user_id = '13cc0930d27c4be0acc14d7c47a3e1f7'
+        out = self.run_command('migration-list --user-id %s' % user_id,
+                               api_version='2.80')[0]
+        self.assert_called('GET', '/os-migrations?user_id=%s' % user_id)
+        self.assertIn('User ID', out)
+        self.assertIn('Project ID', out)
+
+    def test_migration_list_with_project_id_v280(self):
+        project_id = 'b59c18e5fa284fd384987c5cb25a1853'
+        out = self.run_command('migration-list --project-id %s' % project_id,
+                               api_version='2.80')[0]
+        self.assert_called('GET', '/os-migrations?project_id=%s' % project_id)
+        self.assertIn('User ID', out)
+        self.assertIn('Project ID', out)
+
+    def test_migration_list_with_user_and_project_id_v280(self):
+        user_id = '13cc0930d27c4be0acc14d7c47a3e1f7'
+        project_id = 'b59c18e5fa284fd384987c5cb25a1853'
+        out = self.run_command('migration-list --project-id %(project_id)s '
+                               '--user-id %(user_id)s' %
+                               {'user_id': user_id, 'project_id': project_id},
+                               api_version='2.80')[0]
+        self.assert_called('GET', '/os-migrations?project_id=%s&user_id=%s'
+                           % (project_id, user_id))
+        self.assertIn('User ID', out)
+        self.assertIn('Project ID', out)
+
+    def test_migration_list_with_user_id_pre_v280_not_allowed(self):
+        user_id = '13cc0930d27c4be0acc14d7c47a3e1f7'
+        cmd = 'migration-list --user-id %s' % user_id
+        self.assertRaises(SystemExit, self.run_command, cmd,
+                          api_version='2.79')
+
+    def test_migration_list_with_project_id_pre_v280_not_allowed(self):
+        project_id = 'b59c18e5fa284fd384987c5cb25a1853'
+        cmd = 'migration-list --project-id %s' % project_id
+        self.assertRaises(SystemExit, self.run_command, cmd,
+                          api_version='2.79')
+
+    def test_migration_list_pre_v280(self):
+        out = self.run_command('migration-list', api_version='2.79')[0]
+        self.assert_called('GET', '/os-migrations')
+        self.assertNotIn('User ID', out)
+        self.assertNotIn('Project ID', out)
 
     @mock.patch('novaclient.v2.shell._find_server')
     @mock.patch('os.system')
@@ -4026,7 +4372,7 @@ class ShellTest(utils.TestCase):
                                    api_version="2.2")
 
     def test_keypair_stdin(self):
-        with mock.patch('sys.stdin', six.StringIO('FAKE_PUBLIC_KEY')):
+        with mock.patch('sys.stdin', io.StringIO('FAKE_PUBLIC_KEY')):
             self.run_command('keypair-add --pub-key - test', api_version="2.2")
             self.assert_called(
                 'POST', '/os-keypairs', {
@@ -4102,7 +4448,7 @@ class ShellTest(utils.TestCase):
             'server-group-create sg1 anti-affinity '
             '--rule max_server_per_host=foo', api_version='2.64')
         self.assertIn("Invalid 'max_server_per_host' value: foo",
-                      six.text_type(result))
+                      str(result))
 
     def test_create_server_group_with_rules_pre_264(self):
         self.assertRaises(SystemExit, self.run_command,
@@ -4151,8 +4497,9 @@ class ShellTest(utils.TestCase):
                  #   before feature-freeze
                  #   (we can do it, since nova-api change didn't actually add
                  #   new microversion, just an additional checks. See
-                 #   https://review.openstack.org/#/c/233076/ for more details)
+                 #   https://review.opendev.org/#/c/233076/ for more details)
             20,  # doesn't require any changes in novaclient
+            21,  # doesn't require any changes in novaclient
             27,  # NOTE(cdent): 27 adds support for updated microversion
                  #   headers, and is tested in test_api_versions, but is
                  #   not explicitly tested via wraps and _SUBSTITUTIONS.
@@ -4195,15 +4542,26 @@ class ShellTest(utils.TestCase):
             70,  # There are no version-wrapped shell method changes for this.
             71,  # There are no version-wrapped shell method changes for this.
             72,  # There are no version-wrapped shell method changes for this.
+            74,  # There are no version-wrapped shell method changes for this.
+            75,  # There are no version-wrapped shell method changes for this.
+            76,  # doesn't require any changes in novaclient.
+            77,  # There are no version-wrapped shell method changes for this.
+            82,  # There are no version-wrapped shell method changes for this.
+            83,  # There are no version-wrapped shell method changes for this.
+            84,  # There are no version-wrapped shell method changes for this.
+            86,  # doesn't require any changes in novaclient.
+            87,  # doesn't require any changes in novaclient.
         ])
         versions_supported = set(range(0,
                                  novaclient.API_MAX_VERSION.ver_minor + 1))
 
         versions_covered = set()
         for key, values in api_versions._SUBSTITUTIONS.items():
-            for value in values:
-                if value.start_version.ver_major == 2:
-                    versions_covered.add(value.start_version.ver_minor)
+            # Exclude version-wrapped
+            if 'novaclient.tests' not in key:
+                for value in values:
+                    if value.start_version.ver_major == 2:
+                        versions_covered.add(value.start_version.ver_minor)
 
         versions_not_covered = versions_supported - versions_covered
         unaccounted_for = versions_not_covered - exclusions
@@ -4336,6 +4694,22 @@ class ShellTest(utils.TestCase):
         self.assert_called('GET', '/servers/9015', pos=2)
         self.assert_called('GET', '/v2/images/%s' % FAKE_UUID_2, pos=3)
 
+    def test_list_pre_v273(self):
+        exp = self.assertRaises(SystemExit,
+                                self.run_command,
+                                'list --locked t',
+                                api_version='2.72')
+        self.assertEqual(2, exp.code)
+
+    def test_list_v273(self):
+        self.run_command('list --locked t', api_version='2.73')
+        self.assert_called('GET', '/servers/detail?locked=t')
+
+    def test_list_v273_with_sort_key_dir(self):
+        self.run_command('list --sort locked:asc', api_version='2.73')
+        self.assert_called(
+            'GET', '/servers/detail?sort_dir=asc&sort_key=locked')
+
 
 class PollForStatusTestCase(utils.TestCase):
     @mock.patch("novaclient.v2.shell.time")
@@ -4422,3 +4796,27 @@ class PollForStatusTestCase(utils.TestCase):
                           action=action,
                           show_progress=True,
                           silent=False)
+
+
+class TestUtilMethods(utils.TestCase):
+    def setUp(self):
+        super(TestUtilMethods, self).setUp()
+        self.shell = self.useFixture(ShellFixture()).shell
+        # NOTE(danms): Get a client that we can use to call things outside of
+        # the shell main
+        self.shell.cs = fakes.FakeClient('2.1')
+
+    def test_find_images(self):
+        """Test find_images() with a name and id."""
+        images = novaclient.v2.shell._find_images(self.shell.cs,
+                                                  [FAKE_UUID_1,
+                                                   'back1'])
+        self.assertEqual(2, len(images))
+        self.assertEqual(FAKE_UUID_1, images[0].id)
+        self.assertEqual(fakes.FAKE_IMAGE_UUID_BACKUP, images[1].id)
+
+    def test_find_images_missing(self):
+        """Test find_images() where one of the images is not found."""
+        self.assertRaises(exceptions.CommandError,
+                          novaclient.v2.shell._find_images,
+                          self.shell.cs, [FAKE_UUID_1, 'foo'])

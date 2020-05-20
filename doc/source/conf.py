@@ -33,35 +33,11 @@ apidoc_separate_modules = True
 # directive.
 autoclass_content = 'both'
 
-# Add any paths that contain templates here, relative to this directory.
-templates_path = ['_templates']
-
-# The suffix of source filenames.
-source_suffix = '.rst'
-
 # The master toctree document.
 master_doc = 'index'
 
-# openstackdocstheme options
-repository_name = 'openstack/python-novaclient'
-bug_project = 'python-novaclient'
-bug_tag = 'doc'
-project = 'python-novaclient'
 copyright = 'OpenStack Contributors'
 
-# List of directories, relative to source directory, that shouldn't be searched
-# for source files.
-exclude_trees = []
-
-# If true, '()' will be appended to :func: etc. cross-reference text.
-add_function_parentheses = True
-
-# If true, the current module name will be prepended to all description
-# unit titles (such as .. function::).
-add_module_names = True
-
-# The name of the Pygments (syntax highlighting) style to use.
-pygments_style = 'sphinx'
 
 # -- Options for HTML output --------------------------------------------------
 
@@ -73,13 +49,30 @@ html_theme = 'openstackdocs'
 # robots.txt.
 html_extra_path = ['_extra']
 
+
+# -- Options for LaTeX output -------------------------------------------------
+
+latex_documents = [
+    ('index', 'doc-python-novaclient.tex', 'python-novaclient Documentation',
+     'OpenStack Foundation', 'manual'),
+]
+
+latex_elements = {
+    'extraclassoptions': 'openany,oneside',
+    'preamble': r'\setcounter{tocdepth}{4}',
+    'makeindex': '',
+    'printindex': '',
+}
+
 # -- Options for openstackdocstheme -------------------------------------------
 
-repository_name = 'openstack/python-novaclient'
-bug_project = 'python-novaclient'
-bug_tag = ''
-openstack_projects = [
+openstackdocs_repo_name = 'openstack/python-novaclient'
+openstackdocs_bug_project = 'python-novaclient'
+openstackdocs_bug_tag = ''
+openstackdocs_pdf_link = True
+openstackdocs_projects = [
     'keystoneauth',
+    'nova',
     'os-client-config',
     'python-openstackclient',
 ]
