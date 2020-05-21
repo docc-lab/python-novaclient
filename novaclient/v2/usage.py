@@ -17,6 +17,8 @@ Usage interface.
 
 import oslo_utils
 
+from osprofiler import profiler
+
 from novaclient import api_versions
 from novaclient import base
 
@@ -42,6 +44,7 @@ class Usage(base.Resource):
                 self.append_request_ids(new.request_ids)
 
 
+@profiler.trace_cls("nova_usage")
 class UsageManager(base.ManagerWithFind):
     """
     Manage :class:`Usage` resources.
@@ -70,6 +73,7 @@ class UsageManager(base.ManagerWithFind):
                          instance whose usage is part of the report
         :rtype: list of :class:`Usage`.
         """
+        profiler.set_request_type("UsageList")
         query_string = self._usage_query(start, end, detailed=detailed)
         url = '/%s%s' % (self.usage_prefix, query_string)
         return self._list(url, 'tenant_usages')
@@ -92,6 +96,7 @@ class UsageManager(base.ManagerWithFind):
                       is larger than default, the default limit will be used.
         :rtype: list of :class:`Usage`.
         """
+        profiler.set_request_type("UsageList")
         query_string = self._usage_query(start, end, marker, limit, detailed)
         url = '/%s%s' % (self.usage_prefix, query_string)
         return self._list(url, 'tenant_usages')
@@ -106,6 +111,7 @@ class UsageManager(base.ManagerWithFind):
         :param end: :class:`datetime.datetime` End date in UTC
         :rtype: :class:`Usage`
         """
+        profiler.set_request_type("UsageGet")
         query_string = self._usage_query(start, end)
         url = '/%s/%s%s' % (self.usage_prefix, tenant_id, query_string)
         return self._get(url, 'tenant_usage')
@@ -127,6 +133,7 @@ class UsageManager(base.ManagerWithFind):
                       is larger than default, the default limit will be used.
         :rtype: :class:`Usage`
         """
+        profiler.set_request_type("UsageGet")
         query_string = self._usage_query(start, end, marker, limit)
         url = '/%s/%s%s' % (self.usage_prefix, tenant_id, query_string)
         return self._get(url, 'tenant_usage')

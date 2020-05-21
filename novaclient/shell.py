@@ -20,6 +20,8 @@ Command-line interface to the OpenStack Nova API.
 
 import argparse
 import logging
+import re
+import socket
 import sys
 
 from keystoneauth1 import loading
@@ -36,6 +38,8 @@ from novaclient.i18n import _
 from novaclient import utils
 
 osprofiler_profiler = importutils.try_import("osprofiler.profiler")
+import osprofiler.initializer
+from oslo_config import cfg
 
 DEFAULT_MAJOR_OS_COMPUTE_API_VERSION = "2.0"
 # The default behaviour of nova client CLI is that CLI negotiates with server
@@ -243,6 +247,7 @@ class OpenStackComputeShell(object):
 
     def __init__(self):
         self.client_logger = None
+
 
     def _append_global_identity_args(self, parser, argv):
         # Register the CLI arguments that have moved to the session object.
@@ -507,6 +512,21 @@ class OpenStackComputeShell(object):
         # Parse args once to find version and debug settings
         parser = self.get_base_parser(argv)
         (args, args_list) = parser.parse_known_args(argv)
+
+        with open('/etc/nova/nova.conf', 'r') as f:
+            regex = re.compile(r'^connection_string = ([a-zA-Z0-9:/\.]+)')
+            for line in f:
+                res = regex.match(line)
+                if res:
+                    cfg.CONF.profiler.connection_string = res.group(1)
+        cfg.CONF.profiler.hmac_keys = 'Devstack1'
+        osprofiler.initializer.init_from_conf(
+            cfg.CONF,
+            {},  # supposed to be context
+            'novaclient',
+            'novaclient',
+            socket.gethostname()
+        )
 
         self.setup_debugging(args.debug)
         self.extensions = []
